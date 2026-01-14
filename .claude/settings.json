@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bundle exec rubocop:*)",
+      "Bash(bundle exec rspec:*)",
+      "Bash(npx prettier:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run:*)",
+      "Bash(cd backend && *)",
+      "Bash(cd frontend && *)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git add:*)",
+      "Bash(git log:*)",
+      "Bash(ls:*)",
+      "Bash(tree:*)",
+      "Bash(cat:*)",
+      "Bash(rails:*)",
+      "Bash(bundle:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /*)",
+      "Bash(git push --force:*)",
+      "Bash(*>/etc/*)",
+      "Bash(*~/.ssh/*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/mindong-il/ringle-tutor/scripts/auto-format.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

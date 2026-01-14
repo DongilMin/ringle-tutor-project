@@ -1,0 +1,5 @@
+# rbenv 초기화 (Ruby 버전 관리)
+export PATH="$HOME/.rbenv/bin:$PATH"
+eval "$(rbenv init -)"
+
+npx lint-staged
