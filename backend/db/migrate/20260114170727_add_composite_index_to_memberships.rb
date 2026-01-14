@@ -1,7 +1,7 @@
 class AddCompositeIndexToMemberships < ActiveRecord::Migration[8.1]
   def change
     # Add composite index for the most frequent query pattern
-    add_index :memberships, [:user_id, :status, :end_date],
+    add_index :memberships, [ :user_id, :status, :end_date ],
               name: 'idx_memberships_active_lookup',
               comment: 'Optimizes User#active_membership query'
 

@@ -2,9 +2,9 @@ namespace :memberships do
   desc "Expire memberships past their end_date"
   task expire_old: :environment do
     expired_count = Membership
-      .where(status: 'active')
-      .where('end_date < ?', Date.current)
-      .update_all(status: 'expired')
+      .where(status: "active")
+      .where("end_date < ?", Date.current)
+      .update_all(status: "expired")
 
     puts "Expired #{expired_count} membership(s)"
   end

@@ -7,11 +7,11 @@
 
 Rails.application.config.middleware.insert_before 0, Rack::Cors do
   allow do
-    origins ENV.fetch('FRONTEND_URL', 'http://localhost:5173')
+    origins ENV.fetch("FRONTEND_URL", "http://localhost:5173")
 
-    resource '/api/*',
+    resource "/api/*",
       headers: :any,
-      methods: [:get, :post, :put, :patch, :delete, :options, :head],
+      methods: [ :get, :post, :put, :patch, :delete, :options, :head ],
       credentials: true,
       max_age: 600
   end

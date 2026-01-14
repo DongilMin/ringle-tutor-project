@@ -6,21 +6,21 @@ Rails.application.routes.draw do
   namespace :api do
     namespace :v1 do
       # User memberships
-      resources :memberships, only: [:index, :show] do
+      resources :memberships, only: [ :index, :show ] do
         collection do
           get :current
         end
       end
 
       # Payments
-      resources :payments, only: [:index, :show, :create]
+      resources :payments, only: [ :index, :show, :create ]
 
       # Conversations (requires active membership)
-      resources :conversations, only: [:index, :create]
+      resources :conversations, only: [ :index, :create ]
 
       # Admin endpoints
       namespace :admin do
-        resources :memberships, only: [:index, :show, :create, :destroy]
+        resources :memberships, only: [ :index, :show, :create, :destroy ]
       end
     end
   end
