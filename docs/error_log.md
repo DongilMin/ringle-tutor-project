@@ -1,11 +1,929 @@
 # Error Log
 
-> 에러 발생 및 해결 기록
+> Phase별 코드 리뷰에서 발견된 이슈 및 해결 방안
 
 ---
 
-| 날짜 | 에러 | 원인 | 해결책 | 참고 |
-|------|------|------|--------|------|
+## 📋 목차
+
+1. [Phase 2.6 - Payment Service](#phase-26---payment-service)
+2. [Phase 3.1 - Basic UI](#phase-31---basic-ui)
+3. [Phase 3.2 - Audio Features](#phase-32---audio-features)
+4. [전체 요약](#전체-요약)
 
 ---
 
+## Phase 2.6 - Payment Service
+
+### 🔴 Critical Issues
+
+#### 1. Payment-Membership 연결 취약
+
+**파일**: `backend/app/serializers/payment_serializer.rb:24-27`
+
+**문제**:
+```ruby
+def serialize_membership
+  membership = object.user.memberships
+    .where("created_at >= ?", object.created_at - 1.second)
+    .where("created_at <= ?", object.created_at + 1.second)
+    .first
+end
+```
+- 시간 기반(±1초)으로 Payment와 Membership 연결 추정
+- 동시 결제 시 잘못된 Membership 매칭 가능
+- N+1 쿼리 발생
+
+**해결책**:
+```ruby
+# 1. Migration 추가
+class AddMembershipIdToPayments < ActiveRecord::Migration[8.1]
+  def change
+    add_reference :payments, :membership, foreign_key: true
+  end
+end
+
+# 2. PaymentService 수정
+def process
+  ActiveRecord::Base.transaction do
+    payment = create_payment
+    result = call_pg(payment)
+
+    if result[:success]
+      complete_payment(payment, result[:transaction_id])
+      membership = create_membership
+      payment.update!(membership: membership)  # FK 설정
+      { success: true, payment: payment, membership: membership }
+    end
+  end
+end
+
+# 3. Serializer 수정
+def as_json_with_membership
+  as_json.merge(
+    membership: object.membership ? MembershipSerializer.new(object.membership).as_json : nil
+  )
+end
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 2. PG 취소 로직 부재
+
+**파일**: `backend/app/services/payment_service.rb:27-39`
+
+**문제**:
+- PG 결제 성공 후 Membership 생성 실패 시 환불 로직 없음
+- 고객은 돈을 냈지만 멤버십이 없는 상황 발생 가능
+
+**시나리오**:
+```ruby
+# 1. PG 결제 성공 (결제 완료)
+result = call_pg(payment)  # success: true
+
+# 2. Membership 생성 실패 (DB 에러, Validation 에러 등)
+membership = create_membership  # 실패!
+
+# 3. 트랜잭션 롤백으로 Payment는 DB에서 사라짐
+# 4. 하지만 PG사에는 결제 내역이 남아있음 ← 환불 필요!
+```
+
+**해결책**:
+```ruby
+def process
+  payment = nil
+  membership = nil
+  pg_transaction_id = nil
+
+  begin
+    ActiveRecord::Base.transaction do
+      payment = create_payment
+      result = call_pg(payment)
+
+      raise PgError, result[:error] unless result[:success]
+      pg_transaction_id = result[:transaction_id]
+
+      complete_payment(payment, pg_transaction_id)
+      membership = create_membership
+      payment.update!(membership: membership)
+
+      { success: true, payment: payment, membership: membership }
+    end
+  rescue ActiveRecord::RecordInvalid => e
+    # Membership 생성 실패 시 PG 환불
+    if pg_transaction_id
+      refund_pg(pg_transaction_id)
+    end
+    { success: false, error: "Membership creation failed: #{e.message}" }
+  end
+end
+
+private
+
+def refund_pg(transaction_id)
+  pg_client.refund(transaction_id: transaction_id)
+rescue => e
+  Rails.logger.error("PG refund failed: #{e.message}")
+  PaymentAlertService.notify_manual_refund_needed(transaction_id)
+end
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+### 🟡 Warnings
+
+#### 3. 가격 정보 하드코딩
+
+**파일**: `backend/app/services/payment_service.rb:6-16`
+
+**문제**:
+```ruby
+MEMBERSHIP_PRICES = {
+  "basic" => 29_900,
+  "premium" => 59_900,
+  "enterprise" => 99_900
+}.freeze
+```
+- 가격 변경 시 코드 수정 + 배포 필요
+- A/B 테스트, 프로모션 불가능
+- 국가별 가격 차등 불가
+
+**해결책**:
+```ruby
+# Option 1: DB 테이블
+class MembershipPlan < ApplicationRecord
+  # columns: plan_type, price, duration_days, active
+end
+
+# Option 2: 환경변수
+MEMBERSHIP_PRICES = {
+  "basic" => ENV.fetch("BASIC_PRICE", 29_900).to_i,
+  "premium" => ENV.fetch("PREMIUM_PRICE", 59_900).to_i,
+  "enterprise" => ENV.fetch("ENTERPRISE_PRICE", 99_900).to_i
+}
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P2
+
+---
+
+#### 4. ResponseRenderer 미사용
+
+**파일**: `backend/app/controllers/api/v1/payments_controller.rb:12-29`
+
+**문제**:
+- 다른 컨트롤러는 `render_success`/`render_error` 사용
+- PaymentsController만 직접 JSON 렌더링
+- API 응답 형식 불일치
+
+**해결책**:
+```ruby
+def create
+  result = PaymentService.new(...).process
+
+  if result[:success]
+    render_success(
+      message: "Payment processed successfully",
+      data: {
+        payment: PaymentSerializer.new(result[:payment]).as_json,
+        membership: MembershipSerializer.new(result[:membership]).as_json
+      },
+      status: :created
+    )
+  else
+    render_error(
+      message: result[:error],
+      status: :unprocessable_entity,
+      code: "PAYMENT_FAILED"
+    )
+  end
+end
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+## Phase 3.1 - Basic UI
+
+### 🔴 Critical Issues
+
+#### 5. 가격 정보 Backend-Frontend 불일치
+
+**파일**:
+- Backend: `payment_service.rb` - ₩29,900
+- Frontend: `PlanSelector.tsx:9-12` - $9.99
+
+**문제**:
+```tsx
+// Backend
+MEMBERSHIP_PRICES = {
+  "basic" => 29_900,      # ₩29,900
+  "premium" => 59_900,    # ₩59,900
+  "enterprise" => 99_900  # ₩99,900
+}
+
+// Frontend
+const plans = [
+  { id: 'basic', name: 'Basic Plan', price: '$9.99/month' },   // ❌
+  { id: 'premium', name: 'Premium Plan', price: '$19.99/month' }, // ❌
+];
+```
+- 사용자가 $9.99를 보고 구매 → 실제로는 ₩29,900 청구
+- 법적 문제 발생 가능 (허위 광고)
+
+**해결책**:
+```tsx
+// Step 1: Backend API 추가
+// GET /api/v1/membership_plans
+def index
+  plans = [
+    { id: 'basic', name: 'Basic', price: 29_900, duration_days: 30 },
+    { id: 'premium', name: 'Premium', price: 59_900, duration_days: 30 },
+    { id: 'enterprise', name: 'Enterprise', price: 99_900, duration_days: 30 }
+  ]
+  render_success(data: plans)
+end
+
+// Step 2: Frontend에서 API 호출
+const [plans, setPlans] = useState([]);
+
+useEffect(() => {
+  fetch('/api/v1/membership_plans')
+    .then(res => res.json())
+    .then(data => setPlans(data.data));
+}, []);
+
+return (
+  <div>
+    {plans.map((plan) => (
+      <div key={plan.id}>
+        <h3>{plan.name}</h3>
+        <p>₩{plan.price.toLocaleString()}/월</p>
+      </div>
+    ))}
+  </div>
+);
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 6. Enterprise 플랜 누락
+
+**파일**: `frontend/src/components/PlanSelector.tsx:9-12`
+
+**문제**:
+- Backend에는 enterprise 플랜 존재
+- Frontend에는 basic, premium만 표시
+- Enterprise 플랜 구매 불가
+
+**해결책**:
+위의 Issue #5 해결책과 동일 (API에서 동적으로 가져오기)
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 7. API 에러 처리 없음
+
+**파일**: `frontend/src/services/api.ts:31-44`
+
+**문제**:
+```tsx
+async function fetchApi<T>(endpoint: string, options: RequestInit = {}) {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...options.headers },
+  });
+
+  return response.json();  // ❌ HTTP 에러 체크 없음
+}
+```
+
+**시나리오**:
+- 404 Not Found → JSON 파싱 성공하지만 success: false
+- 500 Internal Server Error → JSON 파싱 실패 → Uncaught Exception
+- 네트워크 오프라인 → fetch 실패 → Uncaught Exception
+
+**해결책**:
+```tsx
+class ApiError extends Error {
+  constructor(public message: string, public code: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+async function fetchApi<T>(endpoint: string, options: RequestInit = {}) {
+  try {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers: { "Content-Type": "application/json", ...options.headers },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new ApiError(
+        errorData.error?.message || 'Request failed',
+        errorData.error?.code || 'UNKNOWN_ERROR'
+      );
+    }
+
+    const data: ApiResponse<T> = await response.json();
+
+    if (!data.success) {
+      throw new ApiError(
+        data.error?.message || 'API error',
+        data.error?.code || 'API_ERROR'
+      );
+    }
+
+    return data;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError('Network error', 'NETWORK_ERROR');
+  }
+}
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 8. 인증 헤더 없음
+
+**파일**: `frontend/src/services/api.ts:31-44`
+
+**문제**:
+- Authorization 헤더 없음
+- 향후 사용자 인증 필수
+
+**해결책**:
+```tsx
+async function fetchApi<T>(endpoint: string, options: RequestInit = {}) {
+  const token = localStorage.getItem('auth_token');
+
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
+  });
+
+  // ...
+}
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P1
+
+---
+
+### 🟡 Warnings
+
+#### 9. 인라인 스타일 남용
+
+**파일**: 모든 컴포넌트 (ChatBubble, MembershipCard, PlanSelector, Conversation)
+
+**문제**:
+```tsx
+const bubbleStyle: React.CSSProperties = {
+  maxWidth: "70%",
+  padding: "12px 16px",
+  borderRadius: "16px",
+  // ...
+};
+```
+- 유지보수성 낮음
+- 재사용성 낮음
+- 스타일 변경 시 컴포넌트 수정 필요
+
+**해결책**:
+```tsx
+// ChatBubble.module.css
+.bubble {
+  max-width: 70%;
+  padding: 12px 16px;
+  border-radius: 16px;
+}
+
+.bubbleUser {
+  background-color: #007bff;
+  color: white;
+}
+
+// ChatBubble.tsx
+import styles from './ChatBubble.module.css';
+
+export const ChatBubble = ({ sender, text }) => (
+  <div className={`${styles.bubble} ${sender === 'user' ? styles.bubbleUser : styles.bubbleAi}`}>
+    {text}
+  </div>
+);
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+#### 10. 라우팅 미연결
+
+**파일**: `frontend/src/components/MembershipCard.tsx:28`
+
+**문제**:
+```tsx
+<button onClick={() => console.log('Go to purchase page')}>
+  Purchase Membership
+</button>
+```
+- console.log만 출력
+- 실제 페이지 이동 없음
+
+**해결책**:
+```tsx
+import { useNavigate } from 'react-router-dom';
+
+export const MembershipCard = ({ status }) => {
+  const navigate = useNavigate();
+
+  return (
+    <div>
+      {status === 'none' && (
+        <button onClick={() => navigate('/purchase')}>
+          Purchase Membership
+        </button>
+      )}
+    </div>
+  );
+};
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+#### 11. 스크롤 자동화 없음
+
+**파일**: `frontend/src/pages/Conversation.tsx:22-47`
+
+**문제**:
+- 새 메시지 추가 시 스크롤이 자동으로 내려가지 않음
+- 사용자가 수동으로 스크롤해야 함
+
+**해결책**:
+```tsx
+const chatAreaRef = useRef<HTMLDivElement>(null);
+
+useEffect(() => {
+  if (chatAreaRef.current) {
+    chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
+  }
+}, [messages]);
+
+return (
+  <div ref={chatAreaRef} className="chat-area">
+    {messages.map((message) => <ChatBubble {...message} />)}
+  </div>
+);
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+### 💥 구현 중 발생한 에러
+
+#### ArgumentError: Before process_action callback :require_authentication has not been defined
+
+**발생 일시**: 2026-01-15
+**파일**: `backend/app/controllers/api/v1/membership_plans_controller.rb:4`
+
+**에러 메시지**:
+```
+ArgumentError:
+  Before process_action callback :require_authentication has not been defined
+# ./app/controllers/api/v1/membership_plans_controller.rb:4:in `<class:MembershipPlansController>'
+```
+
+**원인**:
+- `MembershipPlansController`에서 `skip_before_action :require_authentication`을 사용
+- `BaseController`에 `:require_authentication` before_action이 정의되어 있지 않음
+- 아직 인증 시스템이 구현되지 않은 상태에서 불필요한 skip 시도
+
+**해결책**:
+```ruby
+# Before (에러 발생)
+module Api
+  module V1
+    class MembershipPlansController < BaseController
+      skip_before_action :require_authentication  # ❌ require_authentication이 없음
+
+      def index
+        # ...
+      end
+    end
+  end
+end
+
+# After (수정)
+module Api
+  module V1
+    class MembershipPlansController < BaseController
+      def index  # ✅ skip_before_action 제거
+        # ...
+      end
+    end
+  end
+end
+```
+
+**검증**:
+```bash
+$ bundle exec rspec --format documentation
+113 examples, 0 failures
+```
+
+**상태**: ✅ 해결 완료
+**커밋**: `fix(phase-3.1): Remove skip_before_action for undefined callback`
+
+---
+
+## Phase 3.2 - Audio Features
+
+### 🔴 Critical Issues
+
+#### 12. 브라우저 호환성 - audio/webm 미지원
+
+**파일**: `frontend/src/hooks/useAudioRecorder.ts:40`
+
+**문제**:
+```tsx
+const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+```
+- Chrome, Firefox: ✅ audio/webm 지원
+- Safari: ❌ audio/webm 미지원 (audio/mp4만 지원)
+- iOS Safari: MediaRecorder가 iOS 14.3부터 지원
+
+**해결책**:
+```tsx
+const getMimeType = (): string => {
+  const types = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/mp4',
+    'audio/mpeg'
+  ];
+
+  for (const type of types) {
+    if (MediaRecorder.isTypeSupported(type)) {
+      return type;
+    }
+  }
+
+  return ''; // 브라우저 기본값
+};
+
+const startRecording = useCallback(async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mimeType = getMimeType();
+  const mediaRecorder = new MediaRecorder(
+    stream,
+    mimeType ? { mimeType } : {}
+  );
+  // ...
+}, []);
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 13. 메모리 누수 - 이벤트 리스너 cleanup 없음
+
+**파일**: `frontend/src/hooks/useAudioPermission.ts:25`
+
+**문제**:
+```tsx
+useEffect(() => {
+  const checkPermission = async () => {
+    if (navigator.permissions) {
+      const result = await navigator.permissions.query({
+        name: "microphone" as PermissionName,
+      });
+
+      result.addEventListener("change", () => {
+        setPermissionState(result.state as PermissionState);
+      });  // ❌ cleanup 없음
+    }
+  };
+
+  checkPermission();
+}, []);
+```
+- 컴포넌트 unmount 시 이벤트 리스너가 제거되지 않음
+- 메모리 누수 발생
+
+**해결책**:
+```tsx
+useEffect(() => {
+  let permissionStatus: PermissionStatus | null = null;
+
+  const handleChange = () => {
+    if (permissionStatus) {
+      setPermissionState(permissionStatus.state as PermissionState);
+    }
+  };
+
+  const checkPermission = async () => {
+    if (!navigator.permissions) {
+      setPermissionState("prompt");
+      return;
+    }
+
+    try {
+      permissionStatus = await navigator.permissions.query({
+        name: "microphone" as PermissionName,
+      });
+      setPermissionState(permissionStatus.state as PermissionState);
+      permissionStatus.addEventListener("change", handleChange);
+    } catch {
+      setPermissionState("prompt");
+    }
+  };
+
+  checkPermission();
+
+  return () => {
+    if (permissionStatus) {
+      permissionStatus.removeEventListener("change", handleChange);
+    }
+  };
+}, []);
+```
+
+**状态**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 14. AudioContext 불필요한 재생성
+
+**파일**: `frontend/src/components/Waveform.tsx:99`
+
+**문제**:
+```tsx
+useEffect(() => {
+  const audioContext = new AudioContext();
+  // ...
+}, [mediaStream, isRecording, width, height, color, backgroundColor]);
+// ↑ color 변경만 해도 AudioContext 재생성
+```
+- Props 변경 시마다 AudioContext 재생성
+- 성능 저하 및 불필요한 리소스 소비
+
+**해결책**:
+```tsx
+// Effect 분리: AudioContext 생성 (핵심 의존성만)
+useEffect(() => {
+  if (!mediaStream || !isRecording) return;
+
+  const audioContext = new AudioContext();
+  const analyser = audioContext.createAnalyser();
+  const source = audioContext.createMediaStreamSource(mediaStream);
+  source.connect(analyser);
+
+  audioContextRef.current = audioContext;
+  analyserRef.current = analyser;
+
+  return () => {
+    audioContext.close();
+  };
+}, [mediaStream, isRecording]);
+
+// Effect 분리: 그리기 로직 (스타일 의존성)
+useEffect(() => {
+  if (!analyserRef.current || !isRecording) return;
+
+  const draw = () => {
+    // 그리기 로직 (width, height, color 사용)
+  };
+
+  const animationId = requestAnimationFrame(draw);
+  return () => cancelAnimationFrame(animationId);
+}, [isRecording, width, height, color, backgroundColor]);
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+### 🟡 Warnings
+
+#### 15. 타임슬라이스 너무 짧음
+
+**파일**: `frontend/src/hooks/useAudioRecorder.ts:57`
+
+**문제**:
+```tsx
+mediaRecorder.start(100);  // 100ms마다 ondataavailable 호출
+```
+- 1초에 10번 이벤트 발생
+- chunk가 많아짐 → 메모리 사용량 증가
+- 긴 녹음 시 성능 저하
+
+**해결책**:
+```tsx
+mediaRecorder.start(1000);  // 1초마다 수집 (충분함)
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+#### 16. 중복 호출 방지 없음
+
+**파일**: `frontend/src/hooks/useAudioRecorder.ts:32`
+
+**문제**:
+```tsx
+const startRecording = useCallback(async () => {
+  // ❌ 이미 recording인지 체크 없음
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  // ...
+}, []);
+```
+- 이미 녹음 중일 때 startRecording 호출 시 처리 없음
+
+**해결책**:
+```tsx
+const startRecording = useCallback(async () => {
+  if (state !== "idle") {
+    console.warn("Already recording or stopped");
+    return;
+  }
+
+  setError(null);
+  // ...
+}, [state]);
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+#### 17. Waveform 성능 최적화 필요
+
+**파일**: `frontend/src/components/Waveform.tsx:72-86`
+
+**문제**:
+```tsx
+for (let i = 0; i < bufferLength; i++) {  // bufferLength = 1024
+  const v = dataArray[i] / 128.0;
+  const y = (v * height) / 2;
+  // ...
+}
+```
+- 1024개 루프를 매 프레임마다 실행
+- 성능 이슈 가능
+
+**해결책**:
+```tsx
+// 샘플링으로 루프 횟수 감소
+const sampleRate = 4; // 4개당 1개만 그리기
+for (let i = 0; i < bufferLength; i += sampleRate) {
+  const v = dataArray[i] / 128.0;
+  const y = (v * height) / 2;
+
+  if (i === 0) {
+    ctx.moveTo(x, y);
+  } else {
+    ctx.lineTo(x, y);
+  }
+
+  x += sliceWidth * sampleRate;
+}
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+## 전체 요약
+
+### 통계
+
+| 카테고리 | 개수 |
+|---------|------|
+| 🔴 Critical Issues | 10개 |
+| 🟡 Warnings | 7개 |
+| **총계** | **17개** |
+
+### Phase별 분포
+
+| Phase | Critical | Warning | Total |
+|-------|----------|---------|-------|
+| 2.6 - Payment Service | 2개 | 2개 | 4개 |
+| 3.1 - Basic UI | 4개 | 3개 | 7개 |
+| 3.2 - Audio Features | 3개 | 3개 | 6개 |
+
+### 우선순위별 분포
+
+| 우선순위 | 개수 | 이슈 번호 |
+|---------|------|----------|
+| P0 (즉시 수정) | 10개 | #1, #2, #5, #6, #7, #8, #12, #13, #14 |
+| P1 (1주일 내) | 6개 | #4, #9, #10, #11, #15, #16 |
+| P2 (다음 스프린트) | 1개 | #3 |
+
+### 카테고리별 분류
+
+#### 데이터 무결성 (3개)
+- #1: Payment-Membership FK 부재
+- #2: PG 취소 로직 부재
+- #5: 가격 정보 불일치
+
+#### 에러 처리 (2개)
+- #7: API 에러 처리 없음
+- #13: 메모리 누수
+
+#### 브라우저 호환성 (1개)
+- #12: audio/webm 미지원
+
+#### 성능 (3개)
+- #14: AudioContext 재생성
+- #15: 타임슬라이스 100ms
+- #17: Waveform 루프 최적화
+
+#### 코드 품질 (4개)
+- #3: 가격 하드코딩
+- #4: ResponseRenderer 미사용
+- #9: 인라인 스타일
+- #16: 중복 호출 방지
+
+#### UX (4개)
+- #6: Enterprise 플랜 누락
+- #8: 인증 헤더 없음
+- #10: 라우팅 미연결
+- #11: 스크롤 자동화
+
+---
+
+## 다음 단계
+
+### Phase 2.6 후속 작업
+1. Payment-Membership FK 추가 마이그레이션
+2. PG 환불 로직 구현 (MockPgClient에 refund 메서드 추가)
+3. ResponseRenderer 적용
+
+### Phase 3.1 후속 작업
+1. 가격 정보 API 엔드포인트 추가 (`GET /api/v1/membership_plans`)
+2. API 에러 처리 구현 (ApiError 클래스)
+3. React Router 통합
+4. CSS 모듈화
+
+### Phase 3.2 후속 작업
+1. 브라우저 호환성 (동적 mimeType 선택)
+2. 메모리 누수 수정 (이벤트 리스너 cleanup)
+3. Effect 분리 (AudioContext vs 그리기)
+4. 추가 테스트 (Pause/Resume, Duration)
+
+---
+
+## 테스트 결과
+
+### Backend (RSpec)
+- Phase 2.6: 105개 테스트 전체 통과
+
+### Frontend (Vitest)
+- Phase 3.1: 19개 테스트 전체 통과
+- Phase 3.2: 13개 테스트 전체 통과 (Canvas 경고 무시)
+
+---
+
+**마지막 업데이트**: 2026-01-15
+**리뷰어**: Code Review Agent (Claude Sonnet 4.5)
