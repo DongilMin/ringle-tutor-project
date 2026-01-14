@@ -5,6 +5,9 @@ Rails.application.routes.draw do
   # API v1
   namespace :api do
     namespace :v1 do
+      # Membership plans (public)
+      resources :membership_plans, only: [ :index ]
+
       # User memberships
       resources :memberships, only: [ :index, :show ] do
         collection do
