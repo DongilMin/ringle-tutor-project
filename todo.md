@@ -117,39 +117,36 @@
 - [ ] 레이아웃 스타일링
 - [ ] `/checkpoint "대화 화면"` 실행
 
-### 3.2 오디오 기능 (Web Audio API)
+### 3.2 오디오 기능 (Web Audio API) ✅ COMPLETED (phase-3.2-fix)
 
 #### 3.2.1 마이크 권한 훅
-**예상 파일:** `src/hooks/useAudioPermission.ts`
-- [ ] `navigator.mediaDevices.getUserMedia` 권한 요청
-- [ ] 권한 상태 관리 (granted, denied, prompt)
-- [ ] 에러 핸들링
-- [ ] 훅 테스트 (Mock 처리)
-- [ ] `/checkpoint "마이크 권한 훅"` 실행
+**파일:** `src/hooks/useAudioPermission.ts`
+- [x] `navigator.mediaDevices.getUserMedia` 권한 요청
+- [x] 권한 상태 관리 (granted, denied, prompt)
+- [x] 에러 핸들링
+- [x] 훅 테스트 (Mock 처리)
 
 #### 3.2.2 녹음 기능 훅
-**예상 파일:** `src/hooks/useAudioRecorder.ts`
-- [ ] MediaRecorder API 사용
-- [ ] 녹음 시작/중지/일시정지
-- [ ] Blob 데이터 생성
-- [ ] 훅 테스트
-- [ ] `/checkpoint "녹음 기능 훅"` 실행
+**파일:** `src/hooks/useAudioRecorder.ts`
+- [x] MediaRecorder API 사용
+- [x] 녹음 시작/중지/일시정지
+- [x] Blob 데이터 생성
+- [x] 훅 테스트
 
 #### 3.2.3 Waveform 시각화 컴포넌트
-**예상 파일:** `src/components/Waveform.tsx`
-- [ ] AudioContext + AnalyserNode 설정
-- [ ] Canvas 렌더링
-- [ ] `getByteTimeDomainData()` 사용
-- [ ] 실시간 애니메이션
-- [ ] 컴포넌트 테스트
-- [ ] `/checkpoint "Waveform 컴포넌트"` 실행
+**파일:** `src/components/Waveform.tsx`
+- [x] AudioContext + AnalyserNode 설정
+- [x] Canvas 렌더링
+- [x] `getByteTimeDomainData()` 사용
+- [x] 실시간 애니메이션
+- [x] 컴포넌트 테스트
 
-### 3.3 상태 관리
-**예상 파일:** `src/context/ConversationContext.tsx`
-- [ ] 대화 상태 Context 생성
-- [ ] 메시지 히스토리 관리
-- [ ] 녹음 상태 관리
-- [ ] `/checkpoint "상태 관리"` 실행
+### 3.3 상태 관리 ✅ COMPLETED (phase-3.3-fix)
+**파일:** `src/context/ConversationContext.tsx`
+- [x] 대화 상태 Context 생성
+- [x] 메시지 히스토리 관리
+- [x] 녹음 상태 관리
+- [x] 테스트 13개 통과
 
 ---
 

@@ -925,5 +925,65 @@ for (let i = 0; i < bufferLength; i += sampleRate) {
 
 ---
 
+## Git Workflow 에러
+
+### 💥 Phase 3.2, 3.3 커밋 누락
+
+**발생 일시**: 2026-01-15
+
+**에러 증상**:
+```bash
+# origin/phase-3.2, origin/phase-3.3에 frontend 파일이 없음
+$ git ls-tree -r --name-only origin/phase-3.2 | grep frontend/src
+# (출력 없음)
+
+$ git ls-tree -r --name-only origin/phase-3.3 | grep frontend/src
+# (출력 없음)
+```
+
+**원인**:
+1. Phase 3.2, 3.3 브랜치에서 프론트엔드 파일 생성 후 커밋하지 않음
+2. 브랜치 이동 시 untracked 파일로 main에 남아있었음
+3. main 브랜치 정리 중 "중복 파일"로 오인하여 삭제
+4. 실제로는 커밋되지 않은 작업물이었음
+
+**잘못된 판단**:
+```bash
+# main에 있는 untracked 파일들을 "이미 커밋된 파일의 복사본"으로 오인
+$ rm -rf frontend/src/components/Waveform.tsx  # ← 실제 작업물 삭제!
+```
+
+**해결책**:
+```bash
+# 1. Phase 3.2-fix 브랜치에서 재구현
+git checkout -b phase-3.2-fix
+# useAudioPermission.ts, useAudioRecorder.ts, Waveform.tsx 재작성
+git add -A && git commit -m "feat(frontend): Phase 3.2 - Audio Hooks 재구현"
+git push -u origin phase-3.2-fix
+
+# 2. Phase 3.3-fix 브랜치에서 재구현
+git checkout main
+git checkout -b phase-3.3-fix
+# ConversationContext.tsx 재작성
+git add -A && git commit -m "feat(frontend): Phase 3.3 - State Management 재구현"
+git push -u origin phase-3.3-fix
+```
+
+**예방책 (CLAUDE.md에 추가됨)**:
+```
+## 6.1 Git 브랜치 규칙 (필수!)
+
+1. 브랜치 작업이 끝나면 즉시 main 브랜치로 이동
+2. 커밋 전에 반드시 git status로 staged 파일 확인
+3. untracked 파일 삭제 전 해당 브랜치에 커밋 여부 확인
+```
+
+**상태**: ✅ 해결 완료 (재구현)
+**커밋**:
+- `phase-3.2-fix`: 4237fe3
+- `phase-3.3-fix`: ac9d220
+
+---
+
 **마지막 업데이트**: 2026-01-15
 **리뷰어**: Code Review Agent (Claude Sonnet 4.5)

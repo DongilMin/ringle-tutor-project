@@ -412,3 +412,216 @@ useConversation
 
 ---
 
+## Phase 3.2-fix - Audio Hooks 재구현
+
+### 요청
+Phase 3.2 커밋 누락으로 인한 Audio Hooks 재구현
+
+### 생성 파일
+```
+frontend/src/
+├── hooks/
+│   ├── useAudioPermission.ts
+│   └── useAudioRecorder.ts
+├── components/
+│   └── Waveform.tsx
+└── __tests__/
+    ├── hooks/
+    │   ├── useAudioPermission.test.ts
+    │   └── useAudioRecorder.test.ts
+    └── components/
+        └── Waveform.test.tsx
+```
+
+### 핵심 코드
+
+**hooks/useAudioPermission.ts**
+```typescript
+export type PermissionState = "granted" | "denied" | "prompt" | "unknown";
+
+export function useAudioPermission(): UseAudioPermissionReturn {
+  const [permissionState, setPermissionState] = useState<PermissionState>("unknown");
+
+  const requestPermission = useCallback(async (): Promise<boolean> => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      setPermissionState("granted");
+      return true;
+    } catch (err) {
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        setPermissionState("denied");
+        setError("Microphone permission denied");
+      }
+      return false;
+    }
+  }, []);
+
+  return { permissionState, requestPermission, error };
+}
+```
+
+**hooks/useAudioRecorder.ts**
+```typescript
+export type RecordingState = "idle" | "recording" | "paused" | "stopped";
+
+export function useAudioRecorder(): UseAudioRecorderReturn {
+  const startRecording = useCallback(async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunksRef.current.push(event.data);
+    };
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+      setAudioBlob(blob);
+      setAudioUrl(URL.createObjectURL(blob));
+    };
+
+    mediaRecorder.start(100);
+    setState("recording");
+  }, []);
+
+  return { state, audioBlob, startRecording, stopRecording, pauseRecording, resumeRecording, mediaStream };
+}
+```
+
+### 테스트 결과
+```
+useAudioPermission
+  ✓ initializes with unknown permission state
+  ✓ sets permission to granted when getUserMedia succeeds
+  ✓ sets permission to denied on NotAllowedError
+  ✓ sets error when no microphone found
+
+useAudioRecorder
+  ✓ initializes with idle state
+  ✓ starts recording and updates state
+  ✓ stops recording and creates audio blob
+  ✓ resets recording state
+  ✓ handles errors during recording
+
+Waveform
+  ✓ renders canvas element
+  ✓ renders with default dimensions
+  ✓ renders with custom dimensions
+  ✓ applies custom styling
+  ✓ creates AudioContext when recording with stream
+
+14 tests, 0 failures
+```
+
+### Screenshot
+[docs/screenshots/10_audio_hooks_fix.png]
+
+---
+
+## Phase 3.3-fix - State Management 재구현
+
+### 요청
+Phase 3.3 커밋 누락으로 인한 ConversationContext 재구현
+
+### 생성 파일
+```
+frontend/src/
+├── context/
+│   └── ConversationContext.tsx
+└── __tests__/
+    └── context/
+        └── ConversationContext.test.tsx
+```
+
+### 핵심 코드
+
+**context/ConversationContext.tsx**
+```tsx
+export interface Message {
+  id: string;
+  content: string;
+  sender: "user" | "ai";
+  timestamp: Date;
+  audioUrl?: string;
+}
+
+export type ConversationState = "idle" | "recording" | "processing" | "playing";
+
+type Action =
+  | { type: "ADD_MESSAGE"; payload: Message }
+  | { type: "SET_STATE"; payload: ConversationState }
+  | { type: "SET_LOADING"; payload: boolean }
+  | { type: "SET_ERROR"; payload: string | null }
+  | { type: "CLEAR_MESSAGES" };
+
+function conversationReducer(state, action): ConversationContextState {
+  switch (action.type) {
+    case "ADD_MESSAGE":
+      return { ...state, messages: [...state.messages, action.payload] };
+    case "SET_STATE":
+      return { ...state, conversationState: action.payload };
+    case "CLEAR_MESSAGES":
+      return { ...state, messages: [] };
+    default:
+      return state;
+  }
+}
+
+export function ConversationProvider({ children }) {
+  const [state, dispatch] = useReducer(conversationReducer, initialState);
+
+  const addMessage = useCallback((message) => {
+    dispatch({
+      type: "ADD_MESSAGE",
+      payload: { ...message, id: crypto.randomUUID(), timestamp: new Date() },
+    });
+  }, []);
+
+  return (
+    <ConversationContext.Provider value={{ ...state, addMessage, setConversationState, clearMessages }}>
+      {children}
+    </ConversationContext.Provider>
+  );
+}
+
+export function useConversation() {
+  const context = useContext(ConversationContext);
+  if (!context) throw new Error("useConversation must be used within ConversationProvider");
+  return context;
+}
+```
+
+### 테스트 결과
+```
+ConversationContext
+  initial state
+    ✓ provides initial state values
+  addMessage
+    ✓ adds message with generated id and timestamp
+    ✓ adds multiple messages in order
+  setConversationState
+    ✓ updates conversation state
+    ✓ cycles through all states
+  setLoading
+    ✓ sets loading state
+  setError
+    ✓ sets error message
+    ✓ clears error when set to null
+  clearMessages
+    ✓ clears all messages
+  setSessionId
+    ✓ sets session id
+  updateLastMessage
+    ✓ updates the last message
+    ✓ does nothing when no messages exist
+  useConversation hook
+    ✓ throws error when used outside provider
+
+13 tests, 0 failures
+```
+
+### Screenshot
+[docs/screenshots/11_state_management_fix.png]
+
+---
+
