@@ -20,6 +20,17 @@ class MockPgClient
     end
   end
 
+  def refund(transaction_id:)
+    # 시뮬레이션 지연
+    simulate_latency
+
+    {
+      success: true,
+      refund_id: "REFUND_#{transaction_id}_#{SecureRandom.hex(8).upcase}",
+      message: "Refund processed successfully"
+    }
+  end
+
   private
 
   def simulate_latency

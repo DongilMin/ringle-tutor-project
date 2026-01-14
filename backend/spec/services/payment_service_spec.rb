@@ -123,7 +123,11 @@ RSpec.describe PaymentService do
       end
 
       it 'rolls back payment on membership creation failure' do
-        expect { service.process }.to raise_error(ActiveRecord::RecordInvalid)
+        result = service.process
+
+        # 실패 응답 확인
+        expect(result[:success]).to be false
+        expect(result[:error]).to include("Membership creation failed")
 
         # 트랜잭션 롤백으로 payment도 생성되지 않아야 함
         expect(Payment.count).to eq(0)

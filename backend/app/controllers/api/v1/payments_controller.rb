@@ -9,20 +9,20 @@ module Api
         ).process
 
         if result[:success]
-          render json: {
-            success: true,
+          render_success(
             message: "Payment processed successfully",
             data: {
               payment: PaymentSerializer.new(result[:payment]).as_json,
               membership: MembershipSerializer.new(result[:membership]).as_json
-            }
-          }, status: :created
+            },
+            status: :created
+          )
         else
           render json: {
             success: false,
             error: {
-              code: "PAYMENT_FAILED",
-              message: result[:error] || "Payment processing failed"
+              message: result[:error] || "Payment processing failed",
+              code: "PAYMENT_FAILED"
             },
             data: result[:payment] ? { payment: PaymentSerializer.new(result[:payment]).as_json } : nil
           }, status: :unprocessable_entity
