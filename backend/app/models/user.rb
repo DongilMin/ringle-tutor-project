@@ -2,6 +2,7 @@ class User < ApplicationRecord
   EMAIL_REGEX = /\A[\w+\-.]+@[a-z\d\-]+(\.[a-z\d\-]+)*\.[a-z]+\z/i
 
   has_many :memberships, dependent: :destroy
+  has_many :payments, dependent: :destroy
 
   validates :email, presence: true,
                     uniqueness: { case_sensitive: false },
