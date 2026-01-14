@@ -3,6 +3,7 @@ class Payment < ApplicationRecord
   PAYMENT_METHODS = %w[credit_card bank_transfer kakao_pay naver_pay].freeze
 
   belongs_to :user
+  belongs_to :membership, optional: true
 
   validates :amount, presence: true, numericality: { greater_than: 0 }
   validates :status, presence: true, inclusion: { in: STATUSES }
