@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_01_14_170845) do
+ActiveRecord::Schema[8.1].define(version: 2026_01_14_191244) do
   create_table "memberships", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.date "end_date", null: false
@@ -27,11 +27,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_14_170845) do
     t.decimal "amount", precision: 10, scale: 2, null: false
     t.datetime "created_at", null: false
     t.integer "lock_version", default: 0, null: false
+    t.integer "membership_id"
     t.string "payment_method", null: false
     t.string "status", default: "pending", null: false
     t.string "transaction_id"
     t.datetime "updated_at", null: false
     t.integer "user_id", null: false
+    t.index ["membership_id"], name: "index_payments_on_membership_id"
     t.index ["status"], name: "index_payments_on_status"
     t.index ["transaction_id"], name: "index_payments_on_transaction_id", unique: true
     t.index ["user_id"], name: "index_payments_on_user_id"
@@ -47,5 +49,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_14_170845) do
   end
 
   add_foreign_key "memberships", "users"
+  add_foreign_key "payments", "memberships"
   add_foreign_key "payments", "users"
 end

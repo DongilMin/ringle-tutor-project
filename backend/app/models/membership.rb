@@ -3,6 +3,7 @@ class Membership < ApplicationRecord
   STATUSES = %w[active expired cancelled].freeze
 
   belongs_to :user
+  has_one :payment
 
   validates :membership_type, presence: true, inclusion: { in: TYPES }
   validates :start_date, presence: true

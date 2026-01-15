@@ -20,14 +20,9 @@ class PaymentSerializer < BaseSerializer
   private
 
   def serialize_membership
-    # Payment와 연결된 Membership 찾기 (같은 user, 같은 시점에 생성된)
-    membership = object.user.memberships
-      .where("created_at >= ?", object.created_at - 1.second)
-      .where("created_at <= ?", object.created_at + 1.second)
-      .first
+    # Payment와 연결된 Membership 찾기 (FK 기반)
+    return nil unless object.membership
 
-    return nil unless membership
-
-    MembershipSerializer.new(membership).as_json
+    MembershipSerializer.new(object.membership).as_json
   end
 end

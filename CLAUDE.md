@@ -257,6 +257,44 @@ cd frontend && npm test
 
 ---
 
+## 6.1 Git 브랜치 규칙 (필수!)
+
+### 브랜치 작업 완료 후 반드시 main으로 이동
+
+```
+phase-X.Y 브랜치에서 작업
+    ↓
+코드 작성 + 테스트 통과
+    ↓
+git add && git commit && git push
+    ↓
+★★★ git checkout main ★★★   ← 필수! 브랜치 작업 후 반드시 실행
+    ↓
+다음 phase 브랜치로 이동 (phase-X.Z)
+```
+
+### 절대 지켜야 할 규칙
+1. **브랜치 작업이 끝나면 즉시 main 브랜치로 이동**
+2. 다른 브랜치에서 작업 중인 상태로 대기하지 않음
+3. 한 phase 완료 후 바로 main으로 나와서 다음 phase 준비
+
+### 잘못된 예시 (금지)
+```bash
+# phase-3.1 작업 완료 후
+git push origin phase-3.1
+# (main으로 이동하지 않고 그냥 대기) ← 금지!
+```
+
+### 올바른 예시
+```bash
+# phase-3.1 작업 완료 후
+git push origin phase-3.1
+git checkout main              # ← 필수!
+git checkout -b phase-3.2      # 다음 작업
+```
+
+---
+
 ## 7. 테스트 전략
 
 ### Backend (RSpec)
