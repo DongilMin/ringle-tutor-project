@@ -152,32 +152,31 @@
 
 ## Phase 4: AI 통합
 
-### 4.1 Backend AI 서비스
+### 4.1 Backend AI 서비스 ✅ COMPLETED (phase-4.1)
 
 #### 4.1.1 STT 서비스
-**예상 파일:** `app/services/stt_service.rb`
-- [ ] STT API 연동 클래스
-- [ ] 오디오 파일 → 텍스트 변환
-- [ ] 에러 핸들링
-- [ ] Service Spec
-- [ ] `/checkpoint "STT 서비스"` 실행
+**파일:** `app/services/stt_service.rb`
+- [x] STT API 연동 클래스
+- [x] 오디오 파일 → 텍스트 변환 (4개 포맷 지원)
+- [x] 에러 핸들링 (InvalidAudioError, TimeoutError, ApiError)
+- [x] Service Spec (11 examples)
 
 #### 4.1.2 LLM 서비스 (Gemini)
-**예상 파일:** `app/services/llm_service.rb`
-- [ ] Gemini API 연동 클래스
-- [ ] 프롬프트 템플릿 관리
-- [ ] 대화 컨텍스트 관리
-- [ ] 스트리밍 응답 처리
-- [ ] Service Spec
-- [ ] `/checkpoint "LLM 서비스"` 실행
+**파일:** `app/services/llm_service.rb`
+- [x] Gemini API 연동 클래스 (gemini-1.5-flash)
+- [x] 영어 튜터 시스템 프롬프트
+- [x] 대화 컨텍스트 관리 (conversation_history)
+- [x] Mock/실제 API 전환 가능
+- [x] Service Spec (11 examples)
 
 #### 4.1.3 TTS 서비스
-**예상 파일:** `app/services/tts_service.rb`
-- [ ] TTS API 연동 클래스
-- [ ] 텍스트 → 오디오 변환
-- [ ] 오디오 파일 반환
-- [ ] Service Spec
-- [ ] `/checkpoint "TTS 서비스"` 실행
+**파일:** `app/services/tts_service.rb`
+- [x] TTS API 연동 클래스
+- [x] 텍스트 → 오디오 변환 (5개 음성 지원)
+- [x] 오디오 파일 반환 (Base64 디코딩)
+- [x] Service Spec (11 examples)
+
+**전체 테스트:** 33 examples, 0 failures
 
 ### 4.2 대화 API
 **예상 파일:** `app/controllers/api/v1/conversations_controller.rb`

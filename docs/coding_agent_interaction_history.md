@@ -625,3 +625,142 @@ ConversationContext
 
 ---
 
+## Phase 4.1 - Backend AI Services
+
+### 요청
+Backend AI 서비스 구현 - STT, LLM, TTS 서비스
+
+### 생성 파일
+```
+backend/
+├── app/services/
+│   ├── stt_service.rb      # 음성 → 텍스트
+│   ├── llm_service.rb      # AI 대화 생성 (Gemini)
+│   └── tts_service.rb      # 텍스트 → 음성
+└── spec/services/
+    ├── stt_service_spec.rb
+    ├── llm_service_spec.rb
+    └── tts_service_spec.rb
+```
+
+### 핵심 코드
+
+**app/services/stt_service.rb**
+```ruby
+class SttService
+  SUPPORTED_FORMATS = %w[audio/webm audio/wav audio/mp3 audio/ogg].freeze
+  MAX_AUDIO_SIZE = 10.megabytes
+
+  def transcribe(audio_data, content_type: "audio/webm", language: "en")
+    validate_audio!(audio_data, content_type)
+    response = call_stt_api(audio_data, content_type, language)
+    parse_response(response)
+  end
+
+  private
+
+  def validate_audio!(audio_data, content_type)
+    raise InvalidAudioError, "Audio data is required" if audio_data.blank?
+    raise InvalidAudioError, "Audio data is too large" if audio_data.bytesize > MAX_AUDIO_SIZE
+    raise InvalidAudioError, "Unsupported format" unless SUPPORTED_FORMATS.include?(content_type)
+  end
+end
+```
+
+**app/services/llm_service.rb**
+```ruby
+class LlmService
+  DEFAULT_MODEL = "gemini-1.5-flash"
+
+  SYSTEM_PROMPT = <<~PROMPT
+    You are an AI English tutor helping users practice English conversation.
+    Your role is to:
+    1. Engage in natural conversation with the user
+    2. Gently correct grammar and pronunciation mistakes
+    3. Suggest better ways to express ideas
+    4. Keep responses concise and conversational (2-3 sentences)
+    5. Be encouraging and supportive
+  PROMPT
+
+  def chat(user_message, context: [])
+    validate_message!(user_message)
+    @conversation_history << { role: "user", content: user_message }
+    response = call_gemini_api
+    assistant_message = parse_response(response)
+    @conversation_history << { role: "assistant", content: assistant_message }
+    { message: assistant_message, conversation_history: @conversation_history }
+  end
+end
+```
+
+**app/services/tts_service.rb**
+```ruby
+class TtsService
+  SUPPORTED_VOICES = %w[
+    en-US-Standard-A en-US-Standard-B en-US-Standard-C
+    en-GB-Standard-A en-GB-Standard-B
+  ].freeze
+
+  def synthesize(text, voice: DEFAULT_VOICE, format: DEFAULT_FORMAT)
+    validate_text!(text)
+    validate_voice!(voice)
+    response = call_tts_api(text, voice, format)
+    parse_response(response, format)
+  end
+end
+```
+
+### 테스트 결과
+```
+SttService
+  #transcribe
+    with valid audio data
+      ✓ returns transcription result
+      ✓ accepts different languages
+    with invalid audio data
+      ✓ raises error when audio data is blank
+      ✓ raises error when audio is too large
+      ✓ raises error for unsupported audio format
+    with supported audio formats
+      ✓ accepts audio/webm, wav, mp3, ogg formats
+  error handling
+    ✓ wraps timeout errors
+
+LlmService
+  #chat
+    with valid message
+      ✓ returns response with message
+      ✓ maintains conversation history
+      ✓ responds appropriately to greetings
+      ✓ responds appropriately to thanks
+    with context
+      ✓ uses provided context
+    with invalid message
+      ✓ raises error when message is blank/empty/too long
+  #clear_history
+    ✓ clears conversation history
+  configuration
+    ✓ uses default model
+    ✓ allows custom model
+
+TtsService
+  #synthesize
+    with valid text
+      ✓ returns audio data
+      ✓ accepts custom voice
+      ✓ accepts custom format
+    with invalid text/voice
+      ✓ raises appropriate errors
+    with supported voices
+      ✓ accepts en-US/en-GB voices
+  error handling
+    ✓ wraps timeout errors
+
+33 examples, 0 failures
+```
+
+### Screenshot
+[docs/screenshots/12_ai_services.png]
+
+---
+
