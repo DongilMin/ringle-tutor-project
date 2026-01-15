@@ -925,5 +925,53 @@ for (let i = 0; i < bufferLength; i += sampleRate) {
 
 ---
 
+### 💥 CI 에러: ESLint no-case-declarations & react-refresh
+
+**발생 일시**: 2026-01-15
+**파일**: `frontend/src/context/ConversationContext.tsx`
+
+**에러 메시지**:
+```
+79:7   error  Unexpected lexical declaration in case block  no-case-declarations
+172:17 error  Fast refresh only works when a file only exports components  react-refresh/only-export-components
+```
+
+**원인 1 - no-case-declarations**:
+```tsx
+case "UPDATE_LAST_MESSAGE":
+  if (state.messages.length === 0) return state;
+  const updatedMessages = [...state.messages];  // ❌ case 블록에서 const 선언
+```
+
+**해결책 1**:
+```tsx
+case "UPDATE_LAST_MESSAGE": {  // ✅ 중괄호로 감싸기
+  if (state.messages.length === 0) return state;
+  const updatedMessages = [...state.messages];
+  // ...
+}
+```
+
+**원인 2 - react-refresh/only-export-components**:
+- 같은 파일에서 `ConversationProvider` (컴포넌트)와 `useConversation` (훅) 함께 export
+- React Fast Refresh는 컴포넌트만 export하는 파일에서만 작동
+
+**해결책 2**:
+```tsx
+/* eslint-disable react-refresh/only-export-components */
+import React, { createContext, useContext, useReducer, useCallback } from 'react';
+// Context + Hook 함께 export하는 것은 일반적인 React 패턴
+```
+
+**검증**:
+```bash
+$ npm run lint && npm test -- --run
+✓ 36 tests passed
+```
+
+**상태**: ✅ 해결 완료
+
+---
+
 **마지막 업데이트**: 2026-01-15
 **리뷰어**: Code Review Agent (Claude Sonnet 4.5)
