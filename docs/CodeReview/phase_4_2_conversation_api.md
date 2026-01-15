@@ -744,3 +744,47 @@ Client → Controller → STT (3-5초)
 2. 오디오 재생 UI
 3. 실시간 메시지 업데이트
 4. 로딩 상태 관리
+
+---
+
+## 수정 완료 (Fixer Agent)
+
+### 수정 일시
+2026-01-15 20:15
+
+### 수정자
+Claude Opus 4.5 (Fixer Agent)
+
+### 수정 내역
+| # | 이슈 | 수정 파일 | 수정 내용 | 검증 |
+|---|------|-----------|-----------|------|
+| 3 | message_history N+1 | conversation.rb | select로 audio_data 제외 | ✅ 테스트 통과 |
+| 4 | LLM Context 무제한 | conversation_service.rb | MAX_CONTEXT_MESSAGES=20 제한 추가 | ✅ 테스트 통과 |
+| 5 | Base64 예외 미처리 | message_serializer.rb | ArgumentError, TypeError 예외 처리 추가 | ✅ 테스트 통과 |
+| 6 | Serializer N+1 | conversation_serializer.rb | select로 필요한 컬럼만 조회 | ✅ 테스트 통과 |
+| 9 | 기본 타이틀 없음 | conversation.rb | before_validation으로 기본 타이틀 생성 | ✅ 테스트 통과 |
+
+### 미수정 이슈 (아키텍처 변경 필요 - Phase 4.3 권장)
+| # | 이슈 | 사유 |
+|---|------|------|
+| 1 | Binary 컬럼 오디오 저장 | S3/Active Storage 마이그레이션 필요 |
+| 2 | 동기 처리 지연 | WebSocket + Background Job 아키텍처 변경 필요 |
+
+### 테스트 결과
+```
+Backend: 165 examples, 0 failures
+```
+
+### 수정 커밋
+```
+fix(backend): Code Review 반영 - Phase 4.2 Conversation API
+
+- [#3] conversation.rb: message_history select 최적화
+- [#4] conversation_service.rb: LLM context 20개 제한
+- [#5] message_serializer.rb: Base64 예외 처리 추가
+- [#6] conversation_serializer.rb: select 최적화
+- [#9] conversation.rb: 기본 타이틀 자동 생성
+
+Reviewed-by: Claude Sonnet (Code Review Agent)
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+```
