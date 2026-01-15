@@ -29,6 +29,7 @@ export default function Conversation() {
 
   const { requestPermission } = useAudioPermission();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
@@ -55,7 +56,7 @@ export default function Conversation() {
       try {
         const hasPermission = await requestPermission();
         if (!hasPermission) {
-          alert("Microphone permission is required.");
+          setInitError("Microphone permission is required to use this feature.");
           return;
         }
 
@@ -68,15 +69,35 @@ export default function Conversation() {
           content: "Hello! I'm your AI English Tutor. Press the microphone button and say something to start practicing!",
           sender: 'ai',
         });
-      } catch (e) {
+      } catch (e: any) {
         console.error("Failed to start conversation", e);
+        const msg = e.response?.data?.error?.message || e.message || "Failed to start conversation.";
+        setInitError(msg);
       }
     };
 
-    if (!sessionId) {
+    if (!sessionId && !initError) {
       init();
     }
-  }, [sessionId, requestPermission, setSessionId, addMessage]);
+  }, [sessionId, requestPermission, setSessionId, addMessage, initError]);
+
+  if (initError) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-gray-50 p-4 text-center">
+        <div className="mb-4 rounded-full bg-red-100 p-3 text-red-600">
+          <ArrowLeft className="h-8 w-8" />
+        </div>
+        <h2 className="mb-2 text-xl font-bold text-gray-900">Access Denied</h2>
+        <p className="mb-6 text-gray-600">{initError}</p>
+        <button 
+          onClick={() => navigate('/')}
+          className="rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+        >
+          Return Home
+        </button>
+      </div>
+    );
+  }
 
   // Auto-scroll
   useEffect(() => {

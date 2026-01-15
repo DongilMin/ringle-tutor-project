@@ -14,7 +14,9 @@ module Api
 
       # 임시 current_user (추후 인증 시스템 연동)
       def current_user
-        @current_user ||= User.first
+        user = @current_user ||= User.first || User.create!(email: "user@example.com", name: "Test User")
+        puts "BaseController#current_user: #{user.id} - #{user.email}"
+        user
       end
     end
   end
