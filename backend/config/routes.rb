@@ -19,7 +19,7 @@ Rails.application.routes.draw do
       resources :payments, only: [ :index, :show, :create ]
 
       # Conversations (requires active membership)
-      resources :conversations, only: [:index, :show, :create] do
+      resources :conversations, only: [ :index, :show, :create ] do
         member do
           get :messages
           post :messages, action: :send_message
