@@ -10,7 +10,8 @@
 2. [Phase 3.1 - Basic UI](#phase-31---basic-ui)
 3. [Phase 3.2 - Audio Features](#phase-32---audio-features)
 4. [Phase 4.1 - STT/TTS Services](#phase-41---stttts-services)
-5. [전체 요약](#전체-요약)
+5. [Phase 4.2 - Conversation API](#phase-42---conversation-api)
+6. [전체 요약](#전체-요약)
 
 ---
 
@@ -1085,15 +1086,334 @@ end
 
 ---
 
+## Phase 4.2 - Conversation API
+
+### 🔴 Critical Issues
+
+#### 24. Binary 컬럼에 오디오 데이터 직접 저장
+
+**파일**: `backend/db/migrate/20260115103950_create_messages.rb:8`
+
+**문제**:
+```ruby
+create_table :messages do |t|
+  t.binary :audio_data  # ← DB에 직접 저장
+  t.string :audio_content_type
+  t.float :audio_duration
+end
+```
+
+**문제점**:
+- DB 크기 폭발: 10초 오디오 ≈ 100KB, 1000개 메시지 = 100MB
+- 메모리 문제: Active Record가 모든 메시지 로드 시 오디오도 함께 로드
+- 백업 시간 증가, 복제 성능 저하
+
+**해결책**:
+```ruby
+# Active Storage 또는 S3 사용
+class Message < ApplicationRecord
+  has_one_attached :audio
+
+  def audio_url
+    audio.url(expires_in: 1.hour)
+  end
+end
+
+# Migration: binary 제거, storage_key 추가
+t.string :audio_storage_key  # S3 key
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 25. 동기 처리로 인한 누적 지연시간
+
+**파일**: `backend/app/services/conversation_service.rb:13-42`
+
+**문제**:
+```ruby
+def process_audio(conversation, audio_data, content_type)
+  stt_result = transcribe_audio(audio_data, content_type)  # 3-5초
+  user_message = save_user_message(conversation, user_text)
+  llm_result = generate_response(conversation)  # 2-4초
+  tts_result = synthesize_speech(assistant_text)  # 2-3초
+  assistant_message = save_assistant_message(...)
+  # 총 지연시간: 7-12초 → 사용자 경험 매우 나쁨
+end
+```
+
+**해결책**:
+```ruby
+# WebSocket + Background Job으로 비동기 처리
+def process_audio_async(conversation, audio_data)
+  # Step 1: STT만 먼저 처리 (3-5초)
+  stt_result = transcribe_audio(audio_data)
+  user_message = save_user_message(conversation, stt_result[:text])
+
+  # Step 2: 즉시 STT 결과 반환
+  ActionCable.server.broadcast(...)
+
+  # Step 3: Background Job으로 LLM + TTS 처리
+  ProcessAiResponseJob.perform_later(conversation.id)
+end
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 26. N+1 쿼리 - message_history
+
+**파일**: `backend/app/models/conversation.rb:30-33`
+
+**문제**:
+```ruby
+def message_history
+  messages.order(:created_at).map do |msg|
+    { role: msg.role, content: msg.content }
+  end
+end
+```
+- `messages` 호출 시 모든 컬럼 SELECT (audio_data 포함)
+- 100개 메시지 × 100KB = 10MB 메모리 사용
+
+**해결책**:
+```ruby
+def message_history
+  messages
+    .order(:created_at)
+    .select(:id, :role, :content, :created_at)  # audio_data 제외
+    .map { |msg| { role: msg.role, content: msg.content } }
+end
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 27. LLM Context 크기 제한 없음
+
+**파일**: `backend/app/services/conversation_service.rb:83-87`
+
+**문제**:
+```ruby
+def generate_response(conversation)
+  context = conversation.message_history  # ← 전체 히스토리
+  @llm_service.chat(last_user_message, context: context[0..-2])
+end
+```
+
+**시나리오**:
+- 100개 메시지 × 50 토큰 = 5000 토큰
+- 긴 대화일수록 비용 증가, 응답 시간 증가
+
+**해결책**:
+```ruby
+MAX_CONTEXT_MESSAGES = 20  # 최근 20개만
+
+def generate_response(conversation)
+  all_messages = conversation.message_history
+  context = all_messages[-MAX_CONTEXT_MESSAGES..-2] || []
+  @llm_service.chat(last_user_message, context: context)
+end
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 28. Base64 인코딩 예외 처리 누락
+
+**파일**: `backend/app/serializers/message_serializer.rb:17`
+
+**문제**:
+```ruby
+def as_json_with_audio
+  as_json.merge(
+    audio: {
+      data: Base64.strict_encode64(object.audio_data),  # ← 예외 가능
+      # ...
+    }
+  )
+end
+```
+- `audio_data`가 nil이거나 손상된 경우 에러 → 클라이언트에 500 반환
+
+**해결책**:
+```ruby
+def as_json_with_audio
+  return as_json unless object.has_audio?
+
+  begin
+    audio_base64 = Base64.strict_encode64(object.audio_data)
+  rescue ArgumentError, TypeError => e
+    Rails.logger.error("Audio encoding failed: #{e.message}")
+    return as_json.merge(audio_error: "Audio data corrupted")
+  end
+
+  as_json.merge(audio: { data: audio_base64, ... })
+end
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+### 🟡 Warnings
+
+#### 29. ConversationSerializer N+1 가능성
+
+**파일**: `backend/app/serializers/conversation_serializer.rb:15-19`
+
+**문제**:
+```ruby
+def as_json_with_messages
+  as_json.merge(
+    messages: object.messages.chronological.map do |message|
+      MessageSerializer.new(message).as_json  # ← 각 메시지마다 serializer 생성
+    end
+  )
+end
+```
+- 메시지마다 `has_audio?` 호출 → audio_data 컬럼 접근
+
+**해결책**:
+```ruby
+messages_data = object.messages
+  .chronological
+  .select(:id, :role, :content, :audio_content_type, :audio_duration, :created_at)
+  .map { |msg| MessageSerializer.new(msg).as_json }
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+#### 30. 트랜잭션 부재
+
+**파일**: `backend/app/services/conversation_service.rb:13-42`
+
+**문제**:
+- user_message 저장 성공
+- LLM 호출 실패 (타임아웃, API 에러)
+- assistant_message 생성 안됨
+- DB에 사용자 메시지만 남고 AI 응답 없음 → 불완전한 대화
+
+**해결책**:
+```ruby
+def process_audio(conversation, audio_data, content_type)
+  stt_result = transcribe_audio(audio_data, content_type)
+
+  result = nil
+  ActiveRecord::Base.transaction do
+    user_message = save_user_message(conversation, stt_result[:text])
+    llm_result = generate_response(conversation)
+    tts_result = synthesize_speech(llm_result[:message])
+    assistant_message = save_assistant_message(...)
+    result = build_response(user_message, assistant_message, tts_result)
+  end
+
+  result
+end
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+#### 31. 오디오 데이터 중복 인코딩
+
+**파일**: `backend/app/services/conversation_service.rb:118`, `backend/app/serializers/message_serializer.rb:17`
+
+**문제**:
+- ConversationService에서 1번 Base64 인코딩
+- MessageSerializer에서 또 1번 Base64 인코딩
+- 동일한 데이터를 서로 다른 곳에서 인코딩 → 일관성 부족
+
+**해결책**:
+```ruby
+# Serializer에서만 처리
+def build_response(user_message, assistant_message, tts_result)
+  {
+    user_message: MessageSerializer.new(user_message).as_json,
+    assistant_message: MessageSerializer.new(assistant_message).as_json_with_audio
+  }
+end
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+#### 32. 타이틀 자동 생성 없음
+
+**파일**: `backend/app/controllers/api/v1/conversations_controller.rb:23`
+
+**문제**:
+```ruby
+def create
+  conversation = current_user.conversations.create!(title: conversation_params[:title])
+  # title이 nil → 기본값 없음
+end
+```
+
+**해결책**:
+```ruby
+# Model에서 처리
+class Conversation < ApplicationRecord
+  before_validation :set_default_title, if: -> { title.blank? }
+
+  private
+
+  def set_default_title
+    self.title = "Conversation #{Time.current.strftime('%Y-%m-%d %H:%M')}"
+  end
+end
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+#### 33. 메시지 content null 제약 없음
+
+**파일**: `backend/db/migrate/20260115103950_create_messages.rb:7`
+
+**문제**:
+```ruby
+t.text :content  # ← null: false 없음
+```
+- STT 실패 시 content가 nil로 저장될 수 있음
+
+**해결책**:
+```ruby
+t.text :content, null: false  # ← null: false 추가
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
 ## 전체 요약
 
 ### 통계
 
 | 카테고리 | 개수 |
 |---------|------|
-| 🔴 Critical Issues | 13개 |
-| 🟡 Warnings | 10개 |
-| **총계** | **23개** |
+| 🔴 Critical Issues | 18개 |
+| 🟡 Warnings | 15개 |
+| **총계** | **33개** |
 
 ### Phase별 분포
 
@@ -1103,51 +1423,62 @@ end
 | 3.1 - Basic UI | 4개 | 3개 | 7개 |
 | 3.2 - Audio Features | 3개 | 3개 | 6개 |
 | 4.1 - STT/TTS Services | 3개 | 3개 | 6개 |
+| 4.2 - Conversation API | 5개 | 5개 | 10개 |
 
 ### 우선순위별 분포
 
 | 우선순위 | 개수 | 이슈 번호 |
 |---------|------|----------|
-| P0 (즉시 수정) | 13개 | #1, #2, #5, #6, #7, #8, #12, #13, #14, #18, #19, #20 |
-| P1 (1주일 내) | 9개 | #4, #9, #10, #11, #15, #16, #17, #21, #22, #23 |
+| P0 (즉시 수정) | 18개 | #1, #2, #5, #6, #7, #8, #12, #13, #14, #18, #19, #20, #24, #25, #26, #27, #28 |
+| P1 (1주일 내) | 14개 | #4, #9, #10, #11, #15, #16, #17, #21, #22, #23, #29, #30, #31, #32, #33 |
 | P2 (다음 스프린트) | 1개 | #3 |
 
 ### 카테고리별 분류
 
-#### 데이터 무결성 (3개)
+#### 데이터 무결성 (5개)
 - #1: Payment-Membership FK 부재
 - #2: PG 취소 로직 부재
 - #5: 가격 정보 불일치
+- #30: 트랜잭션 부재 (ConversationService)
+- #33: 메시지 content null 제약 없음
 
-#### 에러 처리 (5개)
+#### 에러 처리 (7개)
 - #7: API 에러 처리 없음
 - #13: 메모리 누수
-- #18: Base64 디코딩 예외 처리 누락
+- #18: Base64 디코딩 예외 처리 누락 (TtsService)
 - #19: 에러 타입 불일치 (TtsService)
 - #20: 네트워크 재시도 로직 없음
+- #28: Base64 인코딩 예외 처리 누락 (MessageSerializer)
+- #31: 오디오 데이터 중복 인코딩
 
 #### 브라우저 호환성 (1개)
 - #12: audio/webm 미지원
 
-#### 성능 (4개)
+#### 성능 (8개)
 - #14: AudioContext 재생성
 - #15: 타임슬라이스 100ms
 - #17: Waveform 루프 최적화
 - #23: TTS 캐싱 없음
+- #24: Binary 컬럼에 오디오 데이터 직접 저장
+- #25: 동기 처리로 인한 누적 지연시간
+- #26: N+1 쿼리 (message_history)
+- #29: ConversationSerializer N+1 가능성
 
-#### 코드 품질 (6개)
+#### 코드 품질 (7개)
 - #3: 가격 하드코딩
 - #4: ResponseRenderer 미사용
 - #9: 인라인 스타일
 - #16: 중복 호출 방지
 - #21: 코드 중복 (STT/TTS)
 - #22: 타임아웃 설정 불가
+- #32: 타이틀 자동 생성 없음
 
-#### UX (4개)
+#### UX (5개)
 - #6: Enterprise 플랜 누락
 - #8: 인증 헤더 없음
 - #10: 라우팅 미연결
 - #11: 스크롤 자동화
+- #27: LLM Context 크기 제한 없음
 
 ---
 
@@ -1179,6 +1510,21 @@ end
 6. TTS 캐싱 시스템 구현 (Rails.cache 활용)
 7. 구조화된 로깅 추가 (duration, payload size)
 
+### Phase 4.2 후속 작업
+1. **즉시 수정 (P0)**:
+   - Active Storage/S3로 오디오 데이터 이전
+   - WebSocket (Action Cable) + Background Job (Sidekiq) 구현
+   - message_history에서 audio_data 제외 (select 사용)
+   - LLM Context 크기 제한 (최근 20개 또는 4000 토큰)
+   - Base64 인코딩 예외 처리 추가
+
+2. **1주일 내 개선 (P1)**:
+   - ConversationSerializer select 최적화
+   - ConversationService 트랜잭션 추가
+   - Base64 인코딩 로직 Serializer로 통일
+   - Conversation 타이틀 자동 생성
+   - Message content null: false 제약 추가
+
 ---
 
 ## 테스트 결과
@@ -1186,6 +1532,7 @@ end
 ### Backend (RSpec)
 - Phase 2.6: 105개 테스트 전체 통과
 - Phase 4.1: STT/TTS 서비스 테스트 전체 통과
+- Phase 4.2: Conversation API 테스트 (207 lines) 전체 통과
 
 ### Frontend (Vitest)
 - Phase 3.1: 19개 테스트 전체 통과

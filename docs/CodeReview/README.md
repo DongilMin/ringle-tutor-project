@@ -18,6 +18,7 @@
 | 3.2 | phase_3_2_audio_feature.md | ✅ 완료 | ✅ 수정 완료 | Opus (Fixer) |
 | 3.3 | phase_3_3_state_management.md | ⚠️ 수정필요 | ⏳ 대기 | Sonnet (Reviewer) |
 | 4.1 | phase_4_1_stt_tts.md | ⚠️ 수정필요 | ⏳ 대기 | Sonnet (Reviewer) |
+| 4.2 | phase_4_2_conversation_api.md | ⚠️ 수정필요 | ⏳ 대기 | Sonnet (Reviewer) |
 
 ---
 
