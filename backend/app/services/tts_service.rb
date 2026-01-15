@@ -12,16 +12,14 @@ class TtsService
 
   MAX_TEXT_LENGTH = 5000
   DEFAULT_TIMEOUT = 30
-  DEFAULT_VOICE = "en-US-Standard-A"
-  DEFAULT_FORMAT = "audio/mp3"
+  DEFAULT_VOICE = "alloy"
+  DEFAULT_MODEL = "tts-1"
+  DEFAULT_FORMAT = "mp3"
 
-  SUPPORTED_VOICES = %w[
-    en-US-Standard-A en-US-Standard-B en-US-Standard-C
-    en-GB-Standard-A en-GB-Standard-B
-  ].freeze
+  SUPPORTED_VOICES = %w[alloy echo fable onyx nova shimmer].freeze
 
   def initialize(api_key: nil)
-    @api_key = api_key || ENV.fetch("TTS_API_KEY", nil)
+    @api_key = api_key || ENV.fetch("OPENAI_API_KEY", nil)
   end
 
   def synthesize(text, voice: DEFAULT_VOICE, format: DEFAULT_FORMAT)
@@ -40,6 +38,7 @@ class TtsService
 
   private
 
+  # ... validations remain same ...
   def validate_text!(text)
     raise InvalidTextError, "Text is required" if text.blank?
     raise InvalidTextError, "Text is too long (max #{MAX_TEXT_LENGTH} characters)" if text.length > MAX_TEXT_LENGTH
@@ -47,7 +46,8 @@ class TtsService
 
   def validate_voice!(voice)
     return if SUPPORTED_VOICES.include?(voice)
-
+    # Fallback to default if unsupported, or raise error. 
+    # For robustness, let's allow it but warn, or just restrict.
     raise InvalidTextError, "Unsupported voice: #{voice}"
   end
 
@@ -60,54 +60,58 @@ class TtsService
   end
 
   def mock_synthesis(text, voice, format)
+    # Return mock binary data
     {
-      "success" => true,
-      "audio_data" => Base64.strict_encode64("mock_audio_data_#{text[0..20]}"),
-      "format" => format,
-      "voice" => voice,
-      "duration" => (text.length * 0.05).round(2)
+      body: "mock_binary_audio_data_#{text[0..10]}",
+      format: format
     }
   end
 
   def real_api_call(text, voice, format)
-    uri = URI.parse(tts_endpoint)
+    uri = URI.parse("https://api.openai.com/v1/audio/speech")
     http = Net::HTTP.new(uri.host, uri.port)
-    http.use_ssl = uri.scheme == "https"
+    http.use_ssl = true
     http.open_timeout = DEFAULT_TIMEOUT
     http.read_timeout = DEFAULT_TIMEOUT
 
     request = Net::HTTP::Post.new(uri.path)
     request["Authorization"] = "Bearer #{@api_key}"
     request["Content-Type"] = "application/json"
+    
+    # OpenAI TTS request body
     request.body = {
-      text: text,
+      model: DEFAULT_MODEL,
+      input: text,
       voice: voice,
-      format: format
+      response_format: format
     }.to_json
 
     response = http.request(request)
 
-    raise ApiError, "API returned #{response.code}: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
+    unless response.is_a?(Net::HTTPSuccess)
+      error_body = JSON.parse(response.body) rescue { "error" => response.body }
+      raise ApiError, "OpenAI API returned #{response.code}: #{error_body}"
+    end
 
-    JSON.parse(response.body)
-  end
-
-  def tts_endpoint
-    ENV.fetch("TTS_API_ENDPOINT", "https://api.tts-provider.com/v1/synthesize")
+    # Return the response object directly as it contains the binary body
+    response
   end
 
   def parse_response(response, format)
-    raise ApiError, "Invalid response format" unless response.is_a?(Hash)
-    raise ApiError, response["error"] if response["error"].present?
+    # If it's a mock response (Hash)
+    if response.is_a?(Hash)
+      return {
+        audio_data: response[:body],
+        content_type: "audio/#{format}",
+        duration: nil # Duration not easily available from binary without inspection
+      }
+    end
 
-    audio_data = response["audio_data"]
-    raise ApiError, "No audio data in response" if audio_data.blank?
-
+    # Real API response (Net::HTTPResponse)
     {
-      audio_data: Base64.strict_decode64(audio_data),
-      format: format,
-      duration: response["duration"],
-      content_type: format
+      audio_data: response.body,
+      content_type: "audio/#{format}",
+      duration: nil
     }
   end
 end
