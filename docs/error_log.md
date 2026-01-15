@@ -925,5 +925,51 @@ for (let i = 0; i < bufferLength; i += sampleRate) {
 
 ---
 
+---
+
+### 💥 CI 에러: ESLint no-unused-expressions
+
+**발생 일시**: 2026-01-15
+**파일**: `frontend/src/__tests__/components/Waveform.test.tsx:81`
+
+**에러 메시지**:
+```
+Error: 81:5  error  Expected an assignment or function call and instead saw an expression
+@typescript-eslint/no-unused-expressions
+```
+
+**원인**:
+```tsx
+// Before (에러 발생)
+expect(MockAudioContext).toHaveBeenCalled;  // ❌ 괄호 누락
+```
+- `toHaveBeenCalled`는 함수인데 괄호 없이 사용
+- 추가로 `MockAudioContext`는 클래스라서 spy가 아니므로 `toHaveBeenCalled()` 사용 불가
+
+**해결책**:
+```tsx
+// After (수정)
+it('renders correctly when recording with stream', () => {
+  const mockStream = {
+    getTracks: () => [{ stop: vi.fn() }],
+  } as unknown as MediaStream;
+
+  render(<Waveform mediaStream={mockStream} isRecording={true} />);
+
+  const canvas = screen.getByTestId('waveform-canvas');
+  expect(canvas).toBeInTheDocument();  // ✅ 캔버스 렌더링 확인으로 변경
+});
+```
+
+**검증**:
+```bash
+$ npm run lint && npm test -- --run
+✓ 37 tests passed
+```
+
+**상태**: ✅ 해결 완료
+
+---
+
 **마지막 업데이트**: 2026-01-15
 **리뷰어**: Code Review Agent (Claude Sonnet 4.5)

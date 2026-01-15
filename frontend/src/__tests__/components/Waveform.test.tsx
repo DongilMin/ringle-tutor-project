@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { Waveform } from "../../components/Waveform";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { Waveform } from '../../components/Waveform';
 
 // Mock AudioContext
 class MockAnalyserNode {
@@ -21,63 +21,52 @@ class MockAudioContext {
   close = vi.fn();
 }
 
-describe("Waveform", () => {
+describe('Waveform', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     global.AudioContext = MockAudioContext as unknown as typeof AudioContext;
   });
 
-  it("renders canvas element", () => {
+  it('renders canvas element', () => {
     render(<Waveform mediaStream={null} isRecording={false} />);
 
-    const canvas = screen.getByTestId("waveform-canvas");
+    const canvas = screen.getByTestId('waveform-canvas');
     expect(canvas).toBeInTheDocument();
   });
 
-  it("renders with default dimensions", () => {
+  it('renders with default dimensions', () => {
     render(<Waveform mediaStream={null} isRecording={false} />);
 
-    const canvas = screen.getByTestId("waveform-canvas");
-    expect(canvas).toHaveAttribute("width", "300");
-    expect(canvas).toHaveAttribute("height", "100");
+    const canvas = screen.getByTestId('waveform-canvas');
+    expect(canvas).toHaveAttribute('width', '300');
+    expect(canvas).toHaveAttribute('height', '100');
   });
 
-  it("renders with custom dimensions", () => {
+  it('renders with custom dimensions', () => {
+    render(<Waveform mediaStream={null} isRecording={false} width={400} height={150} />);
+
+    const canvas = screen.getByTestId('waveform-canvas');
+    expect(canvas).toHaveAttribute('width', '400');
+    expect(canvas).toHaveAttribute('height', '150');
+  });
+
+  it('applies custom styling', () => {
     render(
-      <Waveform
-        mediaStream={null}
-        isRecording={false}
-        width={400}
-        height={150}
-      />
+      <Waveform mediaStream={null} isRecording={false} color="#ff0000" backgroundColor="#000000" />
     );
 
-    const canvas = screen.getByTestId("waveform-canvas");
-    expect(canvas).toHaveAttribute("width", "400");
-    expect(canvas).toHaveAttribute("height", "150");
+    const canvas = screen.getByTestId('waveform-canvas');
+    expect(canvas.style.borderRadius).toBe('8px');
   });
 
-  it("applies custom styling", () => {
-    render(
-      <Waveform
-        mediaStream={null}
-        isRecording={false}
-        color="#ff0000"
-        backgroundColor="#000000"
-      />
-    );
-
-    const canvas = screen.getByTestId("waveform-canvas");
-    expect(canvas.style.borderRadius).toBe("8px");
-  });
-
-  it("creates AudioContext when recording with stream", () => {
+  it('renders correctly when recording with stream', () => {
     const mockStream = {
       getTracks: () => [{ stop: vi.fn() }],
     } as unknown as MediaStream;
 
     render(<Waveform mediaStream={mockStream} isRecording={true} />);
 
-    expect(MockAudioContext).toHaveBeenCalled;
+    const canvas = screen.getByTestId('waveform-canvas');
+    expect(canvas).toBeInTheDocument();
   });
 });
