@@ -19,9 +19,9 @@ export const PlanSelector: React.FC<PlanSelectorProps> = ({ onSelectPlan }) => {
       const response = await membershipPlansApi.getAll();
 
       if (response.success && response.data) {
-        setPlans(response.data);
+        setPlans(response.data as MembershipPlan[]);
       } else {
-        setError(response.error?.message || 'Failed to load plans');
+        setError((response.error as any)?.message || 'Failed to load plans');
       }
 
       setLoading(false);

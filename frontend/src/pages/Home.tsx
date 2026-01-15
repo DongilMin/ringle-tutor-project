@@ -3,9 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { checkMembership } from '../services/api';
 import { Mic, CheckCircle, XCircle, Star } from 'lucide-react';
 
+interface Membership {
+  status: string;
+  end_date: string;
+  [key: string]: unknown;
+}
+
 export default function Home() {
   const navigate = useNavigate();
-  const [membership, setMembership] = useState<any>(null);
+  const [membership, setMembership] = useState<Membership | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

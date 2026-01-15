@@ -1,11 +1,11 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Mic, Square } from 'lucide-react';
 import { useConversation } from '../context/ConversationContext';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { useAudioPermission } from '../hooks/useAudioPermission';
 import { Waveform } from '../components/Waveform';
-import { createConversation, sendAudioMessage } from '../services/api';
+import { createConversation, sendAudioMessage, type AudioSendResponse } from '../services/api';
 import clsx from 'clsx';
 
 export default function Conversation() {
@@ -31,6 +31,23 @@ export default function Conversation() {
   const [isProcessing, setIsProcessing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
+  const playResponseAudio = useCallback((dataUrl: string) => {
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
+    }
+
+    const audio = new Audio(dataUrl);
+    audioPlayerRef.current = audio;
+    setConversationState('playing');
+    
+    audio.onended = () => {
+      setConversationState('idle');
+    };
+    
+    audio.play().catch(e => console.error("Playback failed", e));
+  }, [setConversationState]);
 
   // Initialize Conversation
   useEffect(() => {
@@ -76,7 +93,7 @@ export default function Conversation() {
         try {
           const response = await sendAudioMessage(sessionId, audioBlob);
           // Cast response to expected type
-          const { user_message, assistant_message, audio } = response as any;
+          const { user_message, assistant_message, audio } = response as AudioSendResponse;
 
           // 1. Add User Message
           addMessage({
@@ -93,8 +110,12 @@ export default function Conversation() {
           // 3. Play Audio
           if (audio && audio.data) {
             playResponseAudio(`data:${audio.content_type};base64,${audio.data}`);
+          } else if ((response as AudioSendResponse).audio_url) {
+             // Fallback if audio is url
+             // Not implemented yet in this mock
+             setConversationState('idle');
           } else {
-            setConversationState('idle');
+             setConversationState('idle');
           }
 
         } catch (error) {
@@ -111,24 +132,7 @@ export default function Conversation() {
     if (audioBlob) {
       sendAudio();
     }
-  }, [audioBlob, sessionId, addMessage, setConversationState, resetRecording]);
-
-  const playResponseAudio = (dataUrl: string) => {
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current = null;
-    }
-
-    const audio = new Audio(dataUrl);
-    audioPlayerRef.current = audio;
-    setConversationState('playing');
-    
-    audio.onended = () => {
-      setConversationState('idle');
-    };
-    
-    audio.play().catch(e => console.error("Playback failed", e));
-  };
+  }, [audioBlob, sessionId, addMessage, setConversationState, resetRecording, playResponseAudio]);
 
   const handleMicClick = () => {
     if (conversationState === 'idle' || conversationState === 'playing') {

@@ -8,12 +8,15 @@ const api = axios.create({
 });
 
 // Helper for Legacy API format
-const handleResponse = async (request: Promise<any>) => {
+const handleResponse = async (request: Promise<{ data: unknown }>) => {
   try {
     const response = await request;
     return { success: true, data: response.data };
-  } catch (error: any) {
-    return { success: false, error: { message: error.message, code: error.response?.status } };
+  } catch (error) {
+    const err = error as { message: string; response?: { status: number; data?: { code?: string | number; message?: string } } };
+    const code = err.response?.data?.code || err.response?.status;
+    const message = err.response?.data?.message || err.message;
+    return { success: false, error: { message, code } };
   }
 };
 
@@ -43,8 +46,13 @@ export interface ConversationDetail {
 export interface AudioSendResponse {
   user_message: MessageData;
   assistant_message: MessageData;
-  transcribed_text: string;
+  transcribed_text?: string;
   audio_url?: string;
+  audio?: {
+    data: string;
+    content_type: string;
+    duration?: number;
+  };
 }
 
 
@@ -54,7 +62,7 @@ export const checkMembership = async () => {
   try {
     const response = await api.get('/memberships/current');
     return response.data;
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -121,7 +129,7 @@ export const conversationApi = {
   sendAudio: async (id: number, blob: Blob, contentType: string) => {
     // Re-use logic or duplicate for now
     const reader = new FileReader();
-    return new Promise<any>((resolve) => {
+    return new Promise<{ success: boolean; data?: unknown; error?: unknown }>((resolve) => {
         reader.onloadend = async () => {
             const base64Audio = (reader.result as string).split(',')[1];
             try {
@@ -132,8 +140,9 @@ export const conversationApi = {
                     }
                 });
                 resolve({ success: true, data: response.data });
-            } catch (err: any) {
-                resolve({ success: false, error: { message: err.message } });
+            } catch (err) {
+                const message = err instanceof Error ? err.message : 'Unknown error';
+                resolve({ success: false, error: { message } });
             }
         };
         reader.onerror = () => resolve({ success: false, error: { message: "Read error" } });

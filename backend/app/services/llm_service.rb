@@ -9,7 +9,7 @@ class LlmService
   class RateLimitError < LlmError; end
   class InvalidPromptError < LlmError; end
 
-  DEFAULT_MODEL = "gemini-1.5-flash"
+  DEFAULT_MODEL = "gpt-4o-mini"
   MAX_TOKENS = 2048
   DEFAULT_TIMEOUT = 60
 
@@ -26,7 +26,7 @@ class LlmService
   PROMPT
 
   def initialize(api_key: nil, model: DEFAULT_MODEL)
-    @api_key = api_key || ENV.fetch("GEMINI_API_KEY", nil)
+    @api_key = api_key || ENV.fetch("OPENAI_API_KEY", nil)
     @model = model
     @conversation_history = []
   end
@@ -37,7 +37,7 @@ class LlmService
     @conversation_history = context if context.present?
     @conversation_history << { role: "user", content: user_message }
 
-    response = call_gemini_api
+    response = call_openai_api
     assistant_message = parse_response(response)
 
     @conversation_history << { role: "assistant", content: assistant_message }
@@ -61,7 +61,7 @@ class LlmService
     raise InvalidPromptError, "Message is too long (max 10000 characters)" if message.length > 10_000
   end
 
-  def call_gemini_api
+  def call_openai_api
     if Rails.env.test? || ENV["LLM_MOCK_ENABLED"] == "true"
       mock_response
     else
@@ -73,12 +73,10 @@ class LlmService
     last_user_message = @conversation_history.last[:content]
 
     {
-      "candidates" => [
+      "choices" => [
         {
-          "content" => {
-            "parts" => [
-              { "text" => generate_mock_reply(last_user_message) }
-            ]
+          "message" => {
+            "content" => generate_mock_reply(last_user_message)
           }
         }
       ]
@@ -96,13 +94,14 @@ class LlmService
   end
 
   def real_api_call
-    uri = URI.parse(gemini_endpoint)
+    uri = URI.parse("https://api.openai.com/v1/chat/completions")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
     http.open_timeout = DEFAULT_TIMEOUT
     http.read_timeout = DEFAULT_TIMEOUT
 
-    request = Net::HTTP::Post.new("#{uri.path}?key=#{@api_key}")
+    request = Net::HTTP::Post.new(uri.path)
+    request["Authorization"] = "Bearer #{@api_key}"
     request["Content-Type"] = "application/json"
     request.body = build_request_body.to_json
 
@@ -113,44 +112,39 @@ class LlmService
 
   def build_request_body
     {
-      contents: build_contents,
-      generationConfig: {
-        maxOutputTokens: MAX_TOKENS,
-        temperature: 0.7
-      }
+      model: @model,
+      messages: build_messages,
+      max_tokens: MAX_TOKENS,
+      temperature: 0.7
     }
   end
 
-  def build_contents
-    contents = [
-      { role: "user", parts: [ { text: SYSTEM_PROMPT } ] },
-      { role: "model", parts: [ { text: "I understand. I'm ready to help with English practice." } ] }
+  def build_messages
+    messages = [
+      { role: "system", content: SYSTEM_PROMPT }
     ]
 
     @conversation_history.each do |msg|
-      role = msg[:role] == "assistant" ? "model" : "user"
-      contents << { role: role, parts: [ { text: msg[:content] } ] }
+      messages << { role: msg[:role], content: msg[:content] }
     end
 
-    contents
-  end
-
-  def gemini_endpoint
-    "https://generativelanguage.googleapis.com/v1beta/models/#{@model}:generateContent"
+    messages
   end
 
   def handle_response_errors(response)
     case response.code.to_i
     when 200..299 then nil
     when 429 then raise RateLimitError, "API rate limit exceeded"
-    when 400..499 then raise ApiError, "Client error: #{response.body}"
+    when 400..499
+      error_body = JSON.parse(response.body) rescue { "error" => response.body }
+      raise ApiError, "Client error: #{error_body.dig("error", "message") || response.body}"
     when 500..599 then raise ApiError, "Server error: #{response.body}"
     else raise ApiError, "Unexpected response: #{response.code}"
     end
   end
 
   def parse_response(response)
-    text = response.dig("candidates", 0, "content", "parts", 0, "text")
+    text = response.dig("choices", 0, "message", "content")
     raise ApiError, "Empty response from API" if text.blank?
 
     text
