@@ -1,6 +1,23 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef } from 'react';
 
-export type RecordingState = "idle" | "recording" | "paused" | "stopped";
+export type RecordingState = 'idle' | 'recording' | 'paused' | 'stopped';
+
+function getSupportedMimeType(): string {
+  const mimeTypes = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+    'audio/wav',
+  ];
+
+  for (const mimeType of mimeTypes) {
+    if (MediaRecorder.isTypeSupported(mimeType)) {
+      return mimeType;
+    }
+  }
+  return '';
+}
 
 interface UseAudioRecorderReturn {
   state: RecordingState;
@@ -17,7 +34,7 @@ interface UseAudioRecorderReturn {
 }
 
 export function useAudioRecorder(): UseAudioRecorderReturn {
-  const [state, setState] = useState<RecordingState>("idle");
+  const [state, setState] = useState<RecordingState>('idle');
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [duration, setDuration] = useState(0);
@@ -37,7 +54,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setMediaStream(stream);
 
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      const mimeType = getSupportedMimeType();
+      const options: MediaRecorderOptions = mimeType ? { mimeType } : {};
+      const mediaRecorder = new MediaRecorder(stream, options);
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -45,8 +64,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         }
       };
 
+      const blobType = mimeType || 'audio/webm';
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const blob = new Blob(chunksRef.current, { type: blobType });
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
         stream.getTracks().forEach((track) => track.stop());
@@ -61,19 +81,19 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
       }, 1000);
 
-      setState("recording");
+      setState('recording');
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message);
       }
-      setState("idle");
+      setState('idle');
     }
   }, []);
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && state === "recording") {
+    if (mediaRecorderRef.current && state === 'recording') {
       mediaRecorderRef.current.stop();
-      setState("stopped");
+      setState('stopped');
 
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
@@ -83,9 +103,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   }, [state]);
 
   const pauseRecording = useCallback(() => {
-    if (mediaRecorderRef.current && state === "recording") {
+    if (mediaRecorderRef.current && state === 'recording') {
       mediaRecorderRef.current.pause();
-      setState("paused");
+      setState('paused');
 
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
@@ -95,9 +115,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   }, [state]);
 
   const resumeRecording = useCallback(() => {
-    if (mediaRecorderRef.current && state === "paused") {
+    if (mediaRecorderRef.current && state === 'paused') {
       mediaRecorderRef.current.resume();
-      setState("recording");
+      setState('recording');
 
       const pausedDuration = duration * 1000;
       startTimeRef.current = Date.now() - pausedDuration;
@@ -114,7 +134,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     setAudioBlob(null);
     setAudioUrl(null);
     setDuration(0);
-    setState("idle");
+    setState('idle');
     chunksRef.current = [];
   }, [audioUrl]);
 

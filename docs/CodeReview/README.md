@@ -6,14 +6,16 @@
 
 ## 리뷰 상태
 
-| Phase | 파일 | 상태 | 리뷰어 |
-|-------|------|------|--------|
-| 2.1 | phase_2_1_user_model.md | ⏳ 대기 | - |
-| 2.2 | phase_2_2_membership_model.md | ⏳ 대기 | - |
-| 2.3 | phase_2_3_payment_model.md | ⏳ 대기 | - |
-| 2.4 | phase_2_4_membership_api.md | ⏳ 대기 | - |
-| 2.5 | phase_2_5_membership_check.md | ⏳ 대기 | - |
-| 2.6 | phase_2_6_payment_service.md | ⏳ 대기 | - |
+| Phase | 파일 | 리뷰 상태 | 수정 상태 | 리뷰어/수정자 |
+|-------|------|-----------|-----------|---------------|
+| 2.1 | phase_2_1_user_model.md | ⏳ 대기 | - | - |
+| 2.2 | phase_2_2_membership_model.md | ⏳ 대기 | - | - |
+| 2.3 | phase_2_3_payment_model.md | ⏳ 대기 | - | - |
+| 2.4 | phase_2_4_membership_api.md | ⏳ 대기 | - | - |
+| 2.5 | phase_2_5_membership_check.md | ⏳ 대기 | - | - |
+| 2.6 | phase_2_6_payment_service.md | ⏳ 대기 | - | - |
+| 3.2 | phase_3_2_audio_feature.md | ✅ 완료 | ✅ 수정 완료 | Opus (Fixer) |
+| 4.1 | phase_4_1_ai_services.md | ⏳ 대기 | - | - |
 
 ---
 

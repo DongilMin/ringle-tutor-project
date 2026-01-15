@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef } from 'react';
 
 interface WaveformProps {
   mediaStream: MediaStream | null;
@@ -14,19 +14,20 @@ export const Waveform: React.FC<WaveformProps> = ({
   isRecording,
   width = 300,
   height = 100,
-  color = "#4CAF50",
-  backgroundColor = "#1a1a1a",
+  color = '#4CAF50',
+  backgroundColor = '#1a1a1a',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
   useEffect(() => {
     if (!mediaStream || !isRecording) {
       const canvas = canvasRef.current;
       if (canvas) {
-        const ctx = canvas.getContext("2d");
+        const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.fillStyle = backgroundColor;
           ctx.fillRect(0, 0, width, height);
@@ -44,6 +45,7 @@ export const Waveform: React.FC<WaveformProps> = ({
 
     audioContextRef.current = audioContext;
     analyserRef.current = analyser;
+    sourceRef.current = source;
 
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
@@ -51,7 +53,7 @@ export const Waveform: React.FC<WaveformProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const draw = () => {
@@ -92,6 +94,9 @@ export const Waveform: React.FC<WaveformProps> = ({
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
+      if (sourceRef.current) {
+        sourceRef.current.disconnect();
+      }
       if (audioContextRef.current) {
         audioContextRef.current.close();
       }
@@ -104,7 +109,7 @@ export const Waveform: React.FC<WaveformProps> = ({
       width={width}
       height={height}
       style={{
-        borderRadius: "8px",
+        borderRadius: '8px',
         border: `1px solid ${color}`,
       }}
       data-testid="waveform-canvas"
