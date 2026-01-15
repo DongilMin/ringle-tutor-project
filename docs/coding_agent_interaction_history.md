@@ -990,3 +990,177 @@ Test Files  12 passed (12)
 
 ---
 
+## Phase 5.1 - Chrome 브라우저 실시간 디버깅 및 UX 검증
+
+### [2026-01-16] Vibe Coding을 통한 실시간 문제 발견 및 해결
+
+#### 개요
+Claude Code의 Chrome 브라우저 자동화 기능(`--chrome` 모드)을 활용하여 AI가 직접 웹 브라우저에서 사용자 경험을 테스트하고, F12 개발자 도구 콘솔을 통해 런타임 에러를 실시간으로 캐치하여 즉각적인 수정을 진행함.
+
+#### Vibe Coding 접근 방식
+기존의 단위 테스트만으로는 발견하기 어려운 **실제 사용자 플로우에서의 버그**를 AI가 직접 브라우저를 조작하며 발견:
+
+1. **실시간 UI 렌더링 검증** - localhost:5173 접속하여 화면 렌더링 상태 확인
+2. **F12 콘솔 로그 모니터링** - JavaScript 런타임 에러 실시간 캐치
+3. **사용자 시나리오 테스트** - 실제 음성 녹음 → 전송 → AI 응답 플로우 검증
+4. **스크린샷 기반 문제 분석** - 시각적 버그 및 레이아웃 이슈 확인
+
+#### 발견된 문제점 및 해결
+
+##### 1. 음성 메시지 처리 실패 - "Unknown error"
+**발견 방법:** Chrome에서 음성 녹음 후 전송 시 에러 발생, F12 콘솔에서 에러 스택 트레이스 확인
+
+**원인 분석:**
+```
+Frontend: response.data 직접 접근
+Backend 응답: { success: true, data: { ... } }
+→ 중첩된 data 구조로 인한 undefined 참조
+```
+
+**해결:**
+```typescript
+// Before
+resolve(response.data);
+
+// After - Backend 응답 구조에 맞게 수정
+resolve(response.data.data || response.data);
+```
+
+##### 2. 메시지 content 접근 에러 - "Cannot read properties of undefined"
+**발견 방법:** 텍스트 메시지 전송 시 동일한 패턴의 에러 발생
+
+**원인:** `sendTextMessage` 함수에서도 동일한 응답 파싱 문제
+
+**해결:** API 응답 추출 로직 통일
+
+##### 3. STT 텍스트 미표시 문제
+**발견 방법:** 음성 메시지 전송 후 사용자가 "내가 뭐라고 했는지" 확인 불가
+
+**해결:** Backend에서 `transcribed_text` 필드 추가하여 응답에 포함
+
+##### 4. Admin 멤버십 부여 실패
+**발견 방법:** Admin 페이지에서 멤버십 부여 시 "유저 ID 입력" 에러
+
+**원인:** 텍스트 입력 필드에 잘못된 값 입력 가능
+
+**해결:**
+- Users API 엔드포인트 생성 (`/api/v1/admin/users`)
+- 텍스트 입력 → 드롭다운 선택으로 UX 개선
+
+#### 요구사항 미반영 부분 발견 및 구현
+
+Chrome 테스트 중 요구사항 체크리스트 대조하여 누락된 기능 발견:
+
+| 누락 항목 | 구현 내용 |
+|-----------|-----------|
+| Admin 멤버십 관리 UI | `/admin` 페이지 생성, 멤버십 목록/부여/취소 |
+| 음성 응답 다시 듣기 | AI 메시지에 재생 버튼 추가 |
+| 네트워크 에러 처리 | Retry 로직 + ErrorToast 컴포넌트 |
+| 멤버십 만료 자동 처리 | Expirable concern + API 호출 시 자동 체크 |
+
+#### 테스트 결과
+```
+Chrome UX 테스트:
+✓ 홈페이지 렌더링 정상
+✓ 멤버십 구매 플로우 정상
+✓ 음성 녹음 → AI 응답 플로우 정상
+✓ Admin 멤버십 관리 정상
+✓ F12 콘솔 에러 없음
+
+Backend: 171 examples, 0 failures
+Frontend: 75 tests passed
+```
+
+#### 핵심 인사이트
+- **단위 테스트의 한계**: API 응답 구조 불일치는 통합 환경에서만 발견 가능
+- **Vibe Coding의 가치**: AI가 실제 브라우저에서 사용자 행동을 시뮬레이션하여 엣지 케이스 발견
+- **즉각적 피드백 루프**: 문제 발견 → 원인 분석 → 수정 → 검증이 하나의 세션에서 완료
+
+### Screenshot
+[docs/screenshots/05_chrome_testing/]
+
+---
+
+## Phase 5.2 - 코드 품질 개선 및 문서화
+
+### [2026-01-16] 최종 보완 작업
+
+#### 구현 내용
+
+##### 1. LLM 프롬프트 개선
+**목적:** 일관된 주제 대화 유지 및 자연스러운 영어 교정
+
+```ruby
+SYSTEM_PROMPT = <<~PROMPT
+  You are Ringle AI Tutor, a friendly and professional English conversation coach.
+
+  ## Topic Consistency Rules
+  - Stay focused on the current conversation topic
+  - Periodically reference earlier parts of the conversation
+
+  ## Language Correction Guidelines
+  - Use gentle, implicit corrections by naturally rephrasing
+  - Example: "I goed to store" → "Oh, you went to the store! What did you buy?"
+PROMPT
+```
+
+##### 2. 네트워크 오류 처리 강화
+**구현:**
+- Exponential backoff retry 로직 (최대 3회)
+- ErrorToast 컴포넌트로 사용자 친화적 에러 표시
+- 재시도 버튼 제공
+
+```typescript
+export const withRetry = async <T>(fn: () => Promise<T>, retries = 3): Promise<T> => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt < retries) {
+        const delay = 1000 * Math.pow(2, attempt); // Exponential backoff
+        await sleep(delay);
+      }
+    }
+  }
+  throw lastError;
+};
+```
+
+##### 3. 멤버십 만료 자동 처리
+**구현:**
+- `Expirable` concern으로 만료 로직 모듈화
+- API 호출 시 자동 만료 체크
+- Rake task로 배치 처리 가능
+
+```ruby
+module Expirable
+  def check_and_expire!
+    return false unless should_expire?
+    update!(status: "expired")
+  end
+
+  def should_expire?
+    status == "active" && end_date < Date.current
+  end
+end
+```
+
+##### 4. API 문서화
+**생성 파일:** `docs/assumptions.md`
+- 설계 가정 및 결정 사항 문서화
+- 멤버십 타입별 기능/가격/기간 정리
+- 에러 코드 및 응답 형식 명세
+
+##### 5. 테스트 수정
+- Factory 기본값을 premium으로 변경 (conversation 기능 접근 위해)
+- Payment 테스트 가격 기대값 수정 (모델 실제 가격에 맞춤)
+
+#### 최종 테스트 결과
+```
+Backend:  171 examples, 0 failures
+Frontend: 75 tests passed
+Lint:     No offenses detected
+```
+
+---
+

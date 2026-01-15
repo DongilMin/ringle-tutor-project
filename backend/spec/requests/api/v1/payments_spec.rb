@@ -40,7 +40,7 @@ RSpec.describe 'Api::V1::Payments', type: :request do
         post '/api/v1/payments', params: valid_params
 
         json = JSON.parse(response.body)
-        expect(json['data']['payment']['amount']).to eq(29_900.0)
+        expect(json['data']['payment']['amount']).to eq(9_900.0)  # basic price
         expect(json['data']['payment']['status']).to eq('completed')
       end
 

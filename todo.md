@@ -220,19 +220,69 @@
 
 ---
 
-## Phase 5: 마무리 및 배포
+## Phase 5: 프로덕션 레벨 멤버십 시스템 ✅ COMPLETED
 
-### 5.1 문서 정리
+### 5.1 유저/어드민 시스템 ✅
+**파일:** `frontend/src/context/UserContext.tsx`, `frontend/src/pages/Home.tsx`
+- [x] UserContext 생성 (현재 유저, 멤버십, 어드민 상태 관리)
+- [x] 홈 화면을 유저/어드민 선택 화면으로 변경
+- [x] 5명의 데모 유저 (김철수, 이영희, 박민수, 정수진, 최동훈)
+- [x] 백엔드 시드 데이터 생성 (`db/seeds.rb`)
+
+### 5.2 유저 대시보드 ✅
+**파일:** `frontend/src/pages/Dashboard.tsx`
+- [x] 멤버십 상태 카드 (타입, 만료일, 남은 일수)
+- [x] 기능별 접근 카드 (학습, 대화, 분석)
+- [x] 멤버십 없으면 기능 잠금 표시
+- [x] 만료 임박 경고 (7일 이하)
+
+### 5.3 결제 페이지 프로덕션 레벨 ✅
+**파일:** `frontend/src/pages/Purchase.tsx`
+- [x] 플랜 선택 (Basic ₩9,900/30일, Premium ₩19,900/60일)
+- [x] 카드 정보 입력 (번호, 유효기간, CVC, 소유자명)
+- [x] 카드번호 포매팅 (XXXX XXXX XXXX XXXX)
+- [x] 입력 유효성 검사
+- [x] 결제 처리 상태 (processing, success, error)
+- [x] Mock PG 연동
+
+### 5.4 어드민 멤버십 CRUD ✅
+**파일:** `frontend/src/pages/Admin.tsx`, `backend/app/controllers/api/v1/admin/memberships_controller.rb`
+- [x] 중복 방지 (활성 멤버십 보유 유저 필터링)
+- [x] 클라이언트 + 서버 양쪽 중복 체크
+- [x] 에러 메시지 표시
+- [x] 로그아웃 버튼 추가
+
+### 5.5 기능별 권한 체크 ✅
+**파일:** `frontend/src/pages/Learning.tsx`, `frontend/src/pages/Analysis.tsx`, `frontend/src/pages/Conversation.tsx`
+- [x] Learning 페이지 (학습 자료, 진행률)
+- [x] Analysis 페이지 (레벨 분석 리포트)
+- [x] Conversation 페이지에 UserContext 연동
+- [x] hasFeature() 기반 접근 제어
+- [x] 권한 없으면 대시보드로 리다이렉트
+
+### 5.6 테스트 업데이트 ✅
+- [x] Home.test.tsx 업데이트 (유저/어드민 선택 테스트)
+- [x] Purchase.test.tsx 업데이트 (카드 입력 테스트)
+- [x] Conversation.test.tsx 업데이트 (UserContext 연동)
+- [x] App.test.tsx 업데이트
+
+**전체 테스트:** Backend 171, Frontend 79 - 모두 통과
+
+---
+
+## Phase 6: 마무리 및 배포
+
+### 6.1 문서 정리
 - [ ] README.md 최종 정리
 - [ ] API 명세 완성 (`docs/api_specs/`)
 - [ ] coding_agent_interaction_history.md 스크린샷 확인
 
-### 5.2 테스트 최종 확인
-- [ ] Backend 전체 테스트 통과
-- [ ] Frontend 전체 테스트 통과
+### 6.2 테스트 최종 확인
+- [x] Backend 전체 테스트 통과 (171 examples)
+- [x] Frontend 전체 테스트 통과 (79 examples)
 - [ ] CI/CD 파이프라인 확인
 
-### 5.3 배포 준비
+### 6.3 배포 준비
 - [ ] GitHub repo 정리
 - [ ] 시연 영상 촬영 (선택)
 

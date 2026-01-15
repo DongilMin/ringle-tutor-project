@@ -10,15 +10,31 @@ RSpec.describe SttService do
     let(:content_type) { "audio/webm" }
 
     context "with valid audio data" do
+      before do
+        stub_request(:post, "https://api.openai.com/v1/audio/transcriptions")
+          .to_return(
+            status: 200,
+            body: { text: "Hello, this is a test transcription", language: "en" }.to_json,
+            headers: { "Content-Type" => "application/json" }
+          )
+      end
+
       it "returns transcription result" do
         result = service.transcribe(audio_data, content_type: content_type)
 
-        expect(result[:text]).to be_present
+        expect(result[:text]).to eq("Hello, this is a test transcription")
         expect(result[:confidence]).to be_a(Numeric)
         expect(result[:language]).to eq("en")
       end
 
       it "accepts different languages" do
+        stub_request(:post, "https://api.openai.com/v1/audio/transcriptions")
+          .to_return(
+            status: 200,
+            body: { text: "안녕하세요", language: "ko" }.to_json,
+            headers: { "Content-Type" => "application/json" }
+          )
+
         result = service.transcribe(audio_data, content_type: content_type, language: "ko")
 
         expect(result[:language]).to eq("ko")
@@ -37,7 +53,7 @@ RSpec.describe SttService do
       end
 
       it "raises error when audio is too large" do
-        large_audio = "x" * (11 * 1024 * 1024)
+        large_audio = "x" * (26 * 1024 * 1024)
 
         expect { service.transcribe(large_audio) }
           .to raise_error(SttService::InvalidAudioError, /too large/)
@@ -50,6 +66,15 @@ RSpec.describe SttService do
     end
 
     context "with supported audio formats" do
+      before do
+        stub_request(:post, "https://api.openai.com/v1/audio/transcriptions")
+          .to_return(
+            status: 200,
+            body: { text: "Test transcription", language: "en" }.to_json,
+            headers: { "Content-Type" => "application/json" }
+          )
+      end
+
       %w[audio/webm audio/wav audio/mp3 audio/ogg].each do |format|
         it "accepts #{format} format" do
           result = service.transcribe(audio_data, content_type: format)
@@ -64,10 +89,23 @@ RSpec.describe SttService do
     let(:audio_data) { "fake_audio" * 100 }
 
     it "wraps timeout errors" do
-      allow(service).to receive(:call_stt_api).and_raise(Timeout::Error)
+      stub_request(:post, "https://api.openai.com/v1/audio/transcriptions")
+        .to_timeout
 
       expect { service.transcribe(audio_data) }
         .to raise_error(SttService::TimeoutError, /timed out/)
+    end
+
+    it "handles API errors" do
+      stub_request(:post, "https://api.openai.com/v1/audio/transcriptions")
+        .to_return(
+          status: 400,
+          body: { error: { message: "Invalid audio file" } }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      expect { service.transcribe(audio_data) }
+        .to raise_error(SttService::ApiError, /Invalid audio file/)
     end
   end
 end

@@ -220,6 +220,26 @@ RSpec.describe 'Api::V1::Conversations', type: :request do
     let!(:membership) { create(:membership, :active, user: user) }
     let!(:conversation) { create(:conversation, user: user) }
 
+    let(:mock_stt_service) { instance_double(SttService) }
+    let(:mock_llm_service) { instance_double(LlmService) }
+    let(:mock_tts_service) { instance_double(TtsService) }
+
+    before do
+      allow(SttService).to receive(:new).and_return(mock_stt_service)
+      allow(LlmService).to receive(:new).and_return(mock_llm_service)
+      allow(TtsService).to receive(:new).and_return(mock_tts_service)
+
+      allow(mock_llm_service).to receive(:chat).and_return({
+        message: "Hello! How can I help you today?",
+        conversation_history: []
+      })
+      allow(mock_tts_service).to receive(:synthesize).and_return({
+        audio_data: "fake_audio_bytes",
+        content_type: "audio/mp3",
+        duration: 2.5
+      })
+    end
+
     describe 'GET /api/v1/conversations/:id/messages' do
       it 'returns empty array when no messages' do
         get "/api/v1/conversations/#{conversation.id}/messages"
@@ -271,6 +291,31 @@ RSpec.describe 'Api::V1::Conversations', type: :request do
     let!(:membership) { create(:membership, :active, user: user) }
     let!(:conversation) { create(:conversation, user: user) }
     let(:valid_audio_data) { Base64.strict_encode64('fake_audio_data') }
+
+    let(:mock_stt_service) { instance_double(SttService) }
+    let(:mock_llm_service) { instance_double(LlmService) }
+    let(:mock_tts_service) { instance_double(TtsService) }
+
+    before do
+      allow(SttService).to receive(:new).and_return(mock_stt_service)
+      allow(LlmService).to receive(:new).and_return(mock_llm_service)
+      allow(TtsService).to receive(:new).and_return(mock_tts_service)
+
+      allow(mock_stt_service).to receive(:transcribe).and_return({
+        text: "Hello, this is a test",
+        confidence: 0.95,
+        language: "en"
+      })
+      allow(mock_llm_service).to receive(:chat).and_return({
+        message: "Hello! How can I help you today?",
+        conversation_history: []
+      })
+      allow(mock_tts_service).to receive(:synthesize).and_return({
+        audio_data: "fake_audio_bytes",
+        content_type: "audio/mp3",
+        duration: 2.5
+      })
+    end
 
     describe 'POST /api/v1/conversations/:id/audio' do
       it 'processes audio and returns AI response' do

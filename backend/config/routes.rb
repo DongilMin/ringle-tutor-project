@@ -29,6 +29,7 @@ Rails.application.routes.draw do
 
       # Admin endpoints
       namespace :admin do
+        resources :users, only: [ :index ]
         resources :memberships, only: [ :index, :show, :create, :destroy ]
       end
     end

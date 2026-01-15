@@ -36,7 +36,7 @@ class ConversationService
       tts_result[:duration]
     )
 
-    build_response(user_message, assistant_message, tts_result)
+    build_response(user_message, assistant_message, tts_result, transcribed_text: user_text)
   rescue SttService::SttError => e
     raise ProcessingError, "Speech recognition failed: #{e.message}"
   rescue LlmService::LlmError => e
@@ -113,7 +113,7 @@ class ConversationService
     )
   end
 
-  def build_response(user_message, assistant_message, tts_result)
+  def build_response(user_message, assistant_message, tts_result, transcribed_text: nil)
     {
       user_message: {
         id: user_message.id,
@@ -128,6 +128,7 @@ class ConversationService
         created_at: assistant_message.created_at,
         audio_duration: tts_result[:duration]
       },
+      transcribed_text: transcribed_text,
       audio: {
         data: Base64.strict_encode64(tts_result[:audio_data]),
         content_type: tts_result[:content_type],

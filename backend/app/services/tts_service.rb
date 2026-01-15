@@ -38,7 +38,6 @@ class TtsService
 
   private
 
-  # ... validations remain same ...
   def validate_text!(text)
     raise InvalidTextError, "Text is required" if text.blank?
     raise InvalidTextError, "Text is too long (max #{MAX_TEXT_LENGTH} characters)" if text.length > MAX_TEXT_LENGTH
@@ -46,39 +45,23 @@ class TtsService
 
   def validate_voice!(voice)
     return if SUPPORTED_VOICES.include?(voice)
-    # Fallback to default if unsupported, or raise error. 
-    # For robustness, let's allow it but warn, or just restrict.
     raise InvalidTextError, "Unsupported voice: #{voice}"
   end
 
   def call_tts_api(text, voice, format)
-    if Rails.env.test? || ENV["TTS_MOCK_ENABLED"] == "true"
-      mock_synthesis(text, voice, format)
-    else
-      real_api_call(text, voice, format)
-    end
-  end
-
-  def mock_synthesis(text, voice, format)
-    # Return mock binary data
-    {
-      body: "mock_binary_audio_data_#{text[0..10]}",
-      format: format
-    }
-  end
-
-  def real_api_call(text, voice, format)
     uri = URI.parse("https://api.openai.com/v1/audio/speech")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
+    http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+    http.cert_store = OpenSSL::X509::Store.new
+    http.cert_store.set_default_paths
     http.open_timeout = DEFAULT_TIMEOUT
     http.read_timeout = DEFAULT_TIMEOUT
 
     request = Net::HTTP::Post.new(uri.path)
     request["Authorization"] = "Bearer #{@api_key}"
     request["Content-Type"] = "application/json"
-    
-    # OpenAI TTS request body
+
     request.body = {
       model: DEFAULT_MODEL,
       input: text,
@@ -93,21 +76,10 @@ class TtsService
       raise ApiError, "OpenAI API returned #{response.code}: #{error_body}"
     end
 
-    # Return the response object directly as it contains the binary body
     response
   end
 
   def parse_response(response, format)
-    # If it's a mock response (Hash)
-    if response.is_a?(Hash)
-      return {
-        audio_data: response[:body],
-        content_type: "audio/#{format}",
-        duration: nil # Duration not easily available from binary without inspection
-      }
-    end
-
-    # Real API response (Net::HTTPResponse)
     {
       audio_data: response.body,
       content_type: "audio/#{format}",

@@ -16,7 +16,15 @@ class User < ApplicationRecord
     memberships.currently_valid.order(end_date: :desc).first
   end
 
+  def usable_membership
+    memberships.currently_valid.with_remaining_conversations.order(end_date: :desc).first
+  end
+
   def has_active_membership?
     active_membership.present?
+  end
+
+  def can_start_conversation?
+    usable_membership.present? && usable_membership.can_use_conversation?
   end
 end

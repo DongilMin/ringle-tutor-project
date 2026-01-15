@@ -20,8 +20,29 @@ module Api
 
       # POST /api/v1/conversations
       def create
+        membership = current_user.usable_membership
+
+        unless membership&.can_use_conversation?
+          return render_error(
+            message: "No available conversation credits",
+            status: :forbidden,
+            code: "NO_CONVERSATION_CREDITS"
+          )
+        end
+
         conversation = current_user.conversations.create!(title: conversation_params[:title])
-        render_resource(conversation, serializer: ConversationSerializer, status: :created)
+
+        # Deduct conversation credit for usage-based plans
+        membership.deduct_conversation!
+
+        render_resource(
+          conversation,
+          serializer: ConversationSerializer,
+          status: :created,
+          meta: {
+            remaining_conversations: membership.is_usage_based? ? membership.remaining_conversations : nil
+          }
+        )
       end
 
       # GET /api/v1/conversations/:id/messages
@@ -51,9 +72,15 @@ module Api
 
         render_success(data: result, status: :created)
       rescue ConversationService::ProcessingError => e
+        Rails.logger.error("ConversationService::ProcessingError: #{e.message}")
         render_error(message: e.message, status: :unprocessable_entity, code: "processing_error")
       rescue ArgumentError => e
+        Rails.logger.error("ArgumentError: #{e.message}")
         render_error(message: e.message, status: :bad_request, code: "invalid_audio")
+      rescue StandardError => e
+        Rails.logger.error("Unexpected error in send_audio: #{e.class} - #{e.message}")
+        Rails.logger.error(e.backtrace.first(10).join("\n"))
+        render_error(message: "Server error: #{e.message}", status: :internal_server_error, code: "server_error")
       end
 
       private
@@ -63,7 +90,12 @@ module Api
       end
 
       def conversation_params
-        params.permit(:title)
+        # Handle both direct params and nested conversation params
+        if params[:conversation].present?
+          params.require(:conversation).permit(:title)
+        else
+          params.permit(:title)
+        end
       end
 
       def message_params

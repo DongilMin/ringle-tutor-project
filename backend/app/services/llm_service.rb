@@ -14,15 +14,33 @@ class LlmService
   DEFAULT_TIMEOUT = 60
 
   SYSTEM_PROMPT = <<~PROMPT
-    You are an AI English tutor helping users practice English conversation.
-    Your role is to:
-    1. Engage in natural conversation with the user
-    2. Gently correct grammar and pronunciation mistakes
-    3. Suggest better ways to express ideas
-    4. Keep responses concise and conversational (2-3 sentences)
-    5. Be encouraging and supportive
+    You are Ringle AI Tutor, a friendly and professional English conversation coach.
 
-    Respond naturally as if you're having a real conversation.
+    ## Your Teaching Style
+    - Speak naturally like a native English speaker having a real conversation
+    - Keep responses concise (2-3 sentences max) to encourage user participation
+    - Be warm, encouraging, and supportive - celebrate progress!
+    - Ask follow-up questions to keep the conversation flowing
+
+    ## Topic Consistency Rules
+    - Stay focused on the current conversation topic
+    - If the user introduces a new topic, smoothly transition while acknowledging the change
+    - Periodically reference earlier parts of the conversation to show you're engaged
+    - Don't abruptly change subjects unless the user does
+
+    ## Language Correction Guidelines
+    - Only correct significant errors that affect meaning or sound unnatural
+    - Use gentle, implicit corrections by naturally rephrasing what the user said
+    - Example: If user says "I goed to store", respond "Oh, you went to the store! What did you buy?"
+    - Don't over-correct minor mistakes - fluency over perfection
+    - Save explicit grammar explanations for repeated errors
+
+    ## Response Format
+    - Respond directly to what the user said
+    - Include a natural follow-up question when appropriate
+    - Keep the conversation balanced - don't dominate with long explanations
+
+    Remember: Your goal is to build the user's confidence in speaking English naturally.
   PROMPT
 
   def initialize(api_key: nil, model: DEFAULT_MODEL)
@@ -62,41 +80,12 @@ class LlmService
   end
 
   def call_openai_api
-    if Rails.env.test? || ENV["LLM_MOCK_ENABLED"] == "true"
-      mock_response
-    else
-      real_api_call
-    end
-  end
-
-  def mock_response
-    last_user_message = @conversation_history.last[:content]
-
-    {
-      "choices" => [
-        {
-          "message" => {
-            "content" => generate_mock_reply(last_user_message)
-          }
-        }
-      ]
-    }
-  end
-
-  def generate_mock_reply(user_message)
-    if user_message.downcase.include?("hello") || user_message.downcase.include?("hi")
-      "Hello! Great to see you. What would you like to practice today?"
-    elsif user_message.downcase.include?("thank")
-      "You're welcome! Keep up the great work with your English practice."
-    else
-      "That's a great point! Let me help you express that more naturally."
-    end
-  end
-
-  def real_api_call
     uri = URI.parse("https://api.openai.com/v1/chat/completions")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
+    http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+    http.cert_store = OpenSSL::X509::Store.new
+    http.cert_store.set_default_paths
     http.open_timeout = DEFAULT_TIMEOUT
     http.read_timeout = DEFAULT_TIMEOUT
 

@@ -41,26 +41,10 @@ class SttService
   end
 
   def call_stt_api(audio_data, content_type, language)
-    if Rails.env.test? || ENV["STT_MOCK_ENABLED"] == "true"
-      mock_transcription(audio_data, language)
-    else
-      openai_whisper_api(audio_data, content_type, language)
-    end
-  end
-
-  def mock_transcription(_audio_data, language)
-    {
-      "text" => "Hello, this is a test transcription.",
-      "language" => language
-    }
-  end
-
-  def openai_whisper_api(audio_data, content_type, language)
     uri = URI.parse("https://api.openai.com/v1/audio/transcriptions")
 
     boundary = "----WebKitFormBoundary#{SecureRandom.hex(16)}"
 
-    # Determine file extension from content type
     extension = case content_type.split(";").first
     when "audio/webm" then "webm"
     when "audio/wav" then "wav"
@@ -73,6 +57,9 @@ class SttService
 
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
+    http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+    http.cert_store = OpenSSL::X509::Store.new
+    http.cert_store.set_default_paths
     http.open_timeout = DEFAULT_TIMEOUT
     http.read_timeout = DEFAULT_TIMEOUT
 
@@ -94,20 +81,17 @@ class SttService
   def build_multipart_body(boundary, audio_data, extension, language)
     parts = []
 
-    # File field
     parts << "--#{boundary}\r\n"
     parts << "Content-Disposition: form-data; name=\"file\"; filename=\"audio.#{extension}\"\r\n"
     parts << "Content-Type: audio/#{extension}\r\n\r\n"
     parts << audio_data.to_s
     parts << "\r\n"
 
-    # Model field
     parts << "--#{boundary}\r\n"
     parts << "Content-Disposition: form-data; name=\"model\"\r\n\r\n"
     parts << "whisper-1"
     parts << "\r\n"
 
-    # Language field
     parts << "--#{boundary}\r\n"
     parts << "Content-Disposition: form-data; name=\"language\"\r\n\r\n"
     parts << language.to_s

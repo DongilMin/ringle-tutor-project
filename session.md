@@ -34,6 +34,7 @@
 
   소입니다. 아래의 개발
 
+
   과정에 대한 요구사항 및 제출물을 꼭 확인해주세요. 특히
 
   Client - Web은 TypeScript와 React, Backend는 Ruby on Rails를 사용해

@@ -66,11 +66,14 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
       const blobType = mimeType || 'audio/webm';
       mediaRecorder.onstop = () => {
+        console.log('[onstop] Creating blob from chunks:', chunksRef.current.length, 'chunks');
         const blob = new Blob(chunksRef.current, { type: blobType });
+        console.log('[onstop] Blob created, size:', blob.size, 'type:', blob.type);
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
         stream.getTracks().forEach((track) => track.stop());
         setMediaStream(null);
+        console.log('[onstop] audioBlob set, mediaStream cleared');
       };
 
       mediaRecorderRef.current = mediaRecorder;
@@ -91,7 +94,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   }, []);
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && state === 'recording') {
+    console.log('[stopRecording] mediaRecorderRef.current:', mediaRecorderRef.current);
+    console.log(
+      '[stopRecording] mediaRecorderRef.current?.state:',
+      mediaRecorderRef.current?.state
+    );
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      console.log('[stopRecording] Stopping MediaRecorder...');
       mediaRecorderRef.current.stop();
       setState('stopped');
 
@@ -99,8 +108,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         clearInterval(durationIntervalRef.current);
         durationIntervalRef.current = null;
       }
+    } else {
+      console.log('[stopRecording] Condition not met, not stopping');
     }
-  }, [state]);
+  }, []);
 
   const pauseRecording = useCallback(() => {
     if (mediaRecorderRef.current && state === 'recording') {

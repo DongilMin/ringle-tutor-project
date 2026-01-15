@@ -8,6 +8,12 @@ class MembershipSerializer < BaseSerializer
       end_date: format_date(object.end_date),
       is_active: object.active?,
       days_remaining: object.days_remaining,
+      is_usage_based: object.is_usage_based?,
+      remaining_conversations: object.remaining_conversations,
+      can_use_conversation: object.can_use_conversation?,
+      features: object.available_features,
+      can_learn: object.can_learn?,
+      can_analyze: object.can_analyze?,
       created_at: format_datetime(object.created_at),
       updated_at: format_datetime(object.updated_at)
     }
