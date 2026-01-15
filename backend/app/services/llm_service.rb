@@ -123,13 +123,13 @@ class LlmService
 
   def build_contents
     contents = [
-      { role: "user", parts: [{ text: SYSTEM_PROMPT }] },
-      { role: "model", parts: [{ text: "I understand. I'm ready to help with English practice." }] }
+      { role: "user", parts: [ { text: SYSTEM_PROMPT } ] },
+      { role: "model", parts: [ { text: "I understand. I'm ready to help with English practice." } ] }
     ]
 
     @conversation_history.each do |msg|
       role = msg[:role] == "assistant" ? "model" : "user"
-      contents << { role: role, parts: [{ text: msg[:content] }] }
+      contents << { role: role, parts: [ { text: msg[:content] } ] }
     end
 
     contents

@@ -36,7 +36,7 @@ RSpec.describe LlmService do
 
     context "with context" do
       it "uses provided context" do
-        context = [{ role: "user", content: "Previous message" }]
+        context = [ { role: "user", content: "Previous message" } ]
         result = service.chat("New message", context: context)
 
         expect(result[:conversation_history].first[:content]).to eq("Previous message")
