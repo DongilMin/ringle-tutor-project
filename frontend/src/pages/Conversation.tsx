@@ -1,333 +1,239 @@
-import React, { useEffect, useCallback, useRef, useState } from 'react';
-import { ChatBubble } from '../components/ChatBubble';
+import { useEffect, useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Mic, Square } from 'lucide-react';
+import { useConversation } from '../context/ConversationContext';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import {
-  createSession,
-  sendAudioMessage,
-  type UIMessage,
-  type ConversationError,
-} from '../services/conversationService';
+import { useAudioPermission } from '../hooks/useAudioPermission';
+import { Waveform } from '../components/Waveform';
+import { createConversation, sendAudioMessage } from '../services/api';
+import clsx from 'clsx';
 
-type ConversationState = 'idle' | 'recording' | 'processing' | 'playing' | 'error';
-
-const Conversation: React.FC = () => {
-  const [messages, setMessages] = useState<UIMessage[]>([]);
-  const [conversationId, setConversationId] = useState<number | null>(null);
-  const [conversationState, setConversationState] = useState<ConversationState>('idle');
-  const [error, setError] = useState<ConversationError | null>(null);
-  const [isInitializing, setIsInitializing] = useState(true);
-
-  const chatAreaRef = useRef<HTMLDivElement>(null);
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-
-  const {
-    state: recordingState,
-    audioBlob,
-    duration,
-    startRecording,
-    stopRecording,
-    resetRecording,
-    error: recordingError,
+export default function Conversation() {
+  const navigate = useNavigate();
+  const { 
+    messages, 
+    addMessage, 
+    setConversationState, 
+    conversationState, 
+    setSessionId, 
+    sessionId
+  } = useConversation();
+  
+  const { 
+    startRecording, 
+    stopRecording, 
+    mediaStream, 
+    audioBlob, 
+    resetRecording 
   } = useAudioRecorder();
 
-  // Initialize conversation on mount
+  const { requestPermission } = useAudioPermission();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
+  // Initialize Conversation
   useEffect(() => {
-    async function initConversation() {
-      const result = await createSession();
-
-      if (result.success) {
-        setConversationId(result.conversationId);
-        setMessages(result.messages);
-
-        // Add welcome message if no messages
-        if (result.messages.length === 0) {
-          setMessages([
-            {
-              id: 'welcome',
-              content: "Hello! I'm your AI English tutor. Press the record button and speak to me!",
-              sender: 'ai',
-              timestamp: new Date(),
-            },
-          ]);
+    const init = async () => {
+      try {
+        const hasPermission = await requestPermission();
+        if (!hasPermission) {
+          alert("Microphone permission is required.");
+          return;
         }
-      } else {
-        setError(result.error);
-        setConversationState('error');
+
+        // Create new conversation
+        const newConv = await createConversation("New Session " + new Date().toLocaleTimeString());
+        setSessionId(newConv.id);
+        
+        // Add greeting
+        addMessage({
+          content: "Hello! I'm your AI English Tutor. Press the microphone button and say something to start practicing!",
+          sender: 'ai',
+        });
+      } catch (e) {
+        console.error("Failed to start conversation", e);
       }
+    };
 
-      setIsInitializing(false);
+    if (!sessionId) {
+      init();
     }
+  }, [sessionId, requestPermission, setSessionId, addMessage]);
 
-    initConversation();
-  }, []);
-
-  // Scroll to bottom when messages change
+  // Auto-scroll
   useEffect(() => {
-    if (chatAreaRef.current) {
-      chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Play audio helper - must be declared before the useEffect that uses it
-  const playAudio = useCallback((url: string) => {
+  // Handle Audio Blob (Send to Backend)
+  useEffect(() => {
+    const sendAudio = async () => {
+      if (audioBlob && sessionId) {
+        setIsProcessing(true);
+        setConversationState('processing');
+        
+        try {
+          const response = await sendAudioMessage(sessionId, audioBlob);
+          // Cast response to expected type
+          const { user_message, assistant_message, audio } = response as any;
+
+          // 1. Add User Message
+          addMessage({
+            content: user_message.content,
+            sender: 'user',
+          });
+
+          // 2. Add AI Message
+          addMessage({
+            content: assistant_message.content,
+            sender: 'ai',
+          });
+
+          // 3. Play Audio
+          if (audio && audio.data) {
+            playResponseAudio(`data:${audio.content_type};base64,${audio.data}`);
+          } else {
+            setConversationState('idle');
+          }
+
+        } catch (error) {
+          console.error("Failed to send audio", error);
+          alert("Failed to process your message. Please try again.");
+          setConversationState('idle');
+        } finally {
+          setIsProcessing(false);
+          resetRecording();
+        }
+      }
+    };
+
+    if (audioBlob) {
+      sendAudio();
+    }
+  }, [audioBlob, sessionId, addMessage, setConversationState, resetRecording]);
+
+  const playResponseAudio = (dataUrl: string) => {
     if (audioPlayerRef.current) {
       audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
     }
 
-    const audio = new Audio(url);
+    const audio = new Audio(dataUrl);
     audioPlayerRef.current = audio;
-
+    setConversationState('playing');
+    
     audio.onended = () => {
       setConversationState('idle');
     };
+    
+    audio.play().catch(e => console.error("Playback failed", e));
+  };
 
-    audio.onerror = () => {
-      setConversationState('idle');
-    };
-
-    audio.play().catch(() => {
-      setConversationState('idle');
-    });
-  }, []);
-
-  // Handle audio blob when recording stops
-  useEffect(() => {
-    async function processAudio() {
-      if (!audioBlob || !conversationId || conversationState !== 'idle') return;
-
-      setConversationState('processing');
-      setError(null);
-
-      const result = await sendAudioMessage(
-        conversationId,
-        audioBlob,
-        audioBlob.type || 'audio/webm'
-      );
-
-      if (result.success) {
-        setMessages((prev) => [...prev, result.userMessage, result.assistantMessage]);
-
-        // Play AI response audio if available
-        if (result.audioUrl) {
-          setConversationState('playing');
-          playAudio(result.audioUrl);
-        } else {
-          setConversationState('idle');
-        }
-      } else {
-        setError(result.error);
-        setConversationState('error');
+  const handleMicClick = () => {
+    if (conversationState === 'idle' || conversationState === 'playing') {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause(); // Stop playback if recording starts
       }
-
-      resetRecording();
+      setConversationState('recording');
+      startRecording();
+    } else if (conversationState === 'recording') {
+      stopRecording(); 
+      // This will trigger the useEffect([audioBlob])
     }
-
-    if (audioBlob && recordingState === 'stopped') {
-      processAudio();
-    }
-  }, [audioBlob, recordingState, conversationId, conversationState, resetRecording, playAudio]);
-
-  // Recording handlers
-  const handleStartRecording = useCallback(async () => {
-    if (conversationState !== 'idle') return;
-
-    setError(null);
-    setConversationState('recording');
-    await startRecording();
-  }, [conversationState, startRecording]);
-
-  const handleStopRecording = useCallback(() => {
-    if (recordingState !== 'recording') return;
-
-    stopRecording();
-    setConversationState('idle');
-  }, [recordingState, stopRecording]);
-
-  // Error retry
-  const handleRetry = useCallback(() => {
-    setError(null);
-    setConversationState('idle');
-    resetRecording();
-  }, [resetRecording]);
-
-  // Format duration for display
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
-
-  // Get button state
-  const getButtonConfig = () => {
-    if (isInitializing) {
-      return {
-        text: 'Loading...',
-        onClick: () => {},
-        disabled: true,
-        color: '#999',
-      };
-    }
-
-    if (conversationState === 'recording' || recordingState === 'recording') {
-      return {
-        text: `Stop Recording (${formatDuration(duration)})`,
-        onClick: handleStopRecording,
-        disabled: false,
-        color: '#f44336',
-      };
-    }
-
-    if (conversationState === 'processing') {
-      return {
-        text: 'Processing...',
-        onClick: () => {},
-        disabled: true,
-        color: '#ff9800',
-      };
-    }
-
-    if (conversationState === 'playing') {
-      return {
-        text: 'AI Speaking...',
-        onClick: () => {},
-        disabled: true,
-        color: '#2196f3',
-      };
-    }
-
-    return {
-      text: 'Start Recording',
-      onClick: handleStartRecording,
-      disabled: false,
-      color: '#4CAF50',
-    };
-  };
-
-  const buttonConfig = getButtonConfig();
 
   return (
-    <div className="conversation-container">
-      <h1>AI English Tutor</h1>
-
-      {/* Error display */}
-      {(error || recordingError) && (
-        <div
-          style={{
-            padding: '12px',
-            backgroundColor: '#ffebee',
-            color: '#c62828',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <span>{error?.message || recordingError}</span>
-          <button
-            onClick={handleRetry}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: '#c62828',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {/* Chat area */}
-      <div
-        ref={chatAreaRef}
-        className="chat-area"
-        style={{
-          height: '400px',
-          overflowY: 'auto',
-          border: '1px solid #ddd',
-          borderRadius: '8px',
-          padding: '16px',
-          marginBottom: '16px',
-        }}
-      >
-        {messages.map((message) => (
-          <ChatBubble
-            key={message.id}
-            text={message.content}
-            sender={message.sender}
-            timestamp={message.timestamp}
-          />
-        ))}
-
-        {conversationState === 'processing' && (
-          <div
-            style={{
-              textAlign: 'center',
-              color: '#666',
-              padding: '16px',
-            }}
-          >
-            Processing your message...
-          </div>
-        )}
-      </div>
-
-      {/* Controls */}
-      <div className="controls" style={{ textAlign: 'center' }}>
-        <button
-          onClick={buttonConfig.onClick}
-          disabled={buttonConfig.disabled}
-          style={{
-            padding: '16px 32px',
-            fontSize: '18px',
-            backgroundColor: buttonConfig.color,
-            color: 'white',
-            border: 'none',
-            borderRadius: '50px',
-            cursor: buttonConfig.disabled ? 'not-allowed' : 'pointer',
-            opacity: buttonConfig.disabled ? 0.7 : 1,
-            transition: 'all 0.2s',
-          }}
-        >
-          {buttonConfig.text}
+    <div className="flex h-screen flex-col bg-gray-100">
+      {/* Header */}
+      <header className="flex items-center border-b bg-white px-4 py-3 shadow-sm">
+        <button onClick={() => navigate('/')} className="mr-4 rounded-full p-2 hover:bg-gray-100">
+          <ArrowLeft className="h-6 w-6 text-gray-600" />
         </button>
+        <h1 className="text-lg font-bold text-gray-800">Conversation Practice</h1>
+      </header>
 
-        {/* Recording indicator */}
-        {recordingState === 'recording' && (
+      {/* Chat Area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.map((msg) => (
           <div
-            style={{
-              marginTop: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-            }}
+            key={msg.id}
+            className={clsx(
+              "flex w-full",
+              msg.sender === 'user' ? "justify-end" : "justify-start"
+            )}
           >
-            <span
-              style={{
-                width: '12px',
-                height: '12px',
-                backgroundColor: '#f44336',
-                borderRadius: '50%',
-                animation: 'pulse 1s infinite',
-              }}
-            />
-            <span style={{ color: '#666' }}>Recording...</span>
+            <div
+              className={clsx(
+                "max-w-[80%] rounded-2xl px-5 py-3 shadow-sm",
+                msg.sender === 'user'
+                  ? "bg-indigo-600 text-white rounded-br-none"
+                  : "bg-white text-gray-800 rounded-bl-none border border-gray-100"
+              )}
+            >
+              <p className="whitespace-pre-wrap">{msg.content}</p>
+            </div>
           </div>
+        ))}
+        {isProcessing && (
+           <div className="flex justify-start">
+             <div className="flex items-center space-x-2 rounded-2xl bg-gray-200 px-4 py-2 text-sm text-gray-600">
+               <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400"></div>
+               <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400 delay-100"></div>
+               <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400 delay-200"></div>
+               <span>AI is thinking...</span>
+             </div>
+           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-      `}</style>
+      {/* Control Area */}
+      <div className="bg-white p-6 pb-8 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+        <div className="flex flex-col items-center justify-center space-y-4">
+          
+          {/* Waveform Visualization */}
+          <div className="h-16 w-full max-w-md overflow-hidden rounded-xl bg-gray-900 shadow-inner">
+             {conversationState === 'recording' ? (
+               <Waveform 
+                 mediaStream={mediaStream} 
+                 isRecording={true} 
+                 width={400} 
+                 height={64} 
+                 color="#818cf8" 
+                 backgroundColor="#111827"
+               />
+             ) : (
+                <div className="flex h-full w-full items-center justify-center text-xs text-gray-500">
+                  {conversationState === 'processing' ? "Processing Audio..." : "Ready to record"}
+                </div>
+             )}
+          </div>
+
+          {/* Main Action Button */}
+          <button
+            onClick={handleMicClick}
+            disabled={isProcessing}
+            className={clsx(
+              "group relative flex h-20 w-20 items-center justify-center rounded-full transition-all shadow-lg focus:outline-none focus:ring-4 focus:ring-offset-2",
+              conversationState === 'recording' 
+                ? "bg-red-500 hover:bg-red-600 focus:ring-red-300 animate-pulse" 
+                : "bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-300",
+              isProcessing && "opacity-50 cursor-not-allowed"
+            )}
+          >
+            {conversationState === 'recording' ? (
+              <Square className="h-8 w-8 fill-current text-white" />
+            ) : (
+              <Mic className="h-8 w-8 text-white" />
+            )}
+          </button>
+          
+          <p className="text-sm font-medium text-gray-500">
+            {conversationState === 'recording' ? "Listening..." : "Tap to speak"}
+          </p>
+        </div>
+      </div>
     </div>
   );
-};
-
-export default Conversation;
+}
