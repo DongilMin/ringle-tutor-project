@@ -24,7 +24,7 @@ class MockAudioContext {
 describe('Waveform', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    global.AudioContext = MockAudioContext as unknown as typeof AudioContext;
+    vi.stubGlobal('AudioContext', MockAudioContext);
   });
 
   it('renders canvas element', () => {

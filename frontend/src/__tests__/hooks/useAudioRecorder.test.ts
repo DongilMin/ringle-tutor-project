@@ -9,7 +9,9 @@ class MockMediaRecorder {
   onstop: (() => void) | null = null;
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  constructor(stream: MediaStream, options?: MediaRecorderOptions) {}
+  constructor(_stream: MediaStream, _options?: MediaRecorderOptions) {
+    // Mock constructor - parameters intentionally unused
+  }
 
   start = vi.fn(() => {
     this.state = 'recording';
@@ -31,7 +33,7 @@ class MockMediaRecorder {
   });
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  static isTypeSupported(mimeType: string): boolean {
+  static isTypeSupported(_mimeType: string): boolean {
     return true;
   }
 }
@@ -41,7 +43,7 @@ describe('useAudioRecorder', () => {
     vi.clearAllMocks();
 
     // Mock MediaRecorder
-    global.MediaRecorder = MockMediaRecorder as unknown as typeof MediaRecorder;
+    vi.stubGlobal('MediaRecorder', MockMediaRecorder);
 
     // Mock getUserMedia
     const mockStream = {
@@ -53,8 +55,11 @@ describe('useAudioRecorder', () => {
     });
 
     // Mock URL.createObjectURL
-    global.URL.createObjectURL = vi.fn(() => 'blob:test-url');
-    global.URL.revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:test-url'),
+      revokeObjectURL: vi.fn(),
+    });
   });
 
   it('initializes with idle state', () => {

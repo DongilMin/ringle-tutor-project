@@ -764,3 +764,229 @@ TtsService
 
 ---
 
+## Phase 4.2: 대화 API (Conversation API)
+
+### 날짜
+2026-01-15
+
+### 프롬프트
+```
+Phase 4.2 대화 API 구현
+- Conversation, Message 모델 생성
+- ConversationService (STT→LLM→TTS 파이프라인)
+- ConversationsController API 엔드포인트
+- Request Spec 작성
+```
+
+### 구현 내용
+
+#### 1. 모델 생성
+**파일:** `app/models/conversation.rb`, `app/models/message.rb`
+
+```ruby
+# Conversation 모델
+class Conversation < ApplicationRecord
+  belongs_to :user
+  has_many :messages, dependent: :destroy
+
+  STATUSES = { active: "active", completed: "completed", archived: "archived" }.freeze
+
+  validates :status, presence: true, inclusion: { in: STATUSES.values }
+  scope :active, -> { where(status: STATUSES[:active]) }
+  scope :recent, -> { order(updated_at: :desc) }
+end
+
+# Message 모델
+class Message < ApplicationRecord
+  belongs_to :conversation
+  ROLES = { user: "user", assistant: "assistant" }.freeze
+
+  validates :role, presence: true, inclusion: { in: ROLES.values }
+  validates :content, presence: true
+end
+```
+
+#### 2. ConversationService (AI 파이프라인)
+**파일:** `app/services/conversation_service.rb`
+
+```ruby
+class ConversationService
+  def initialize(stt_service: nil, llm_service: nil, tts_service: nil)
+    @stt_service = stt_service || SttService.new
+    @llm_service = llm_service || LlmService.new
+    @tts_service = tts_service || TtsService.new
+  end
+
+  def process_audio(conversation, audio_data, content_type:)
+    # Step 1: STT - 음성 → 텍스트
+    stt_result = @stt_service.transcribe(audio_data, content_type: content_type)
+
+    # Step 2: 사용자 메시지 저장
+    user_message = save_user_message(conversation, stt_result[:text])
+
+    # Step 3: LLM - AI 응답 생성
+    llm_result = @llm_service.chat(stt_result[:text], context: conversation.message_history)
+
+    # Step 4: TTS - 텍스트 → 음성
+    tts_result = @tts_service.synthesize(llm_result[:message])
+
+    # Step 5: 어시스턴트 메시지 저장 (오디오 포함)
+    assistant_message = save_assistant_message(conversation, llm_result[:message], tts_result)
+
+    build_response(user_message, assistant_message, tts_result)
+  end
+
+  def process_text(conversation, user_text)
+    # 텍스트 입력 처리 (STT 스킵)
+  end
+end
+```
+
+#### 3. API 엔드포인트
+**파일:** `app/controllers/api/v1/conversations_controller.rb`
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | /api/v1/conversations | 대화 목록 |
+| GET | /api/v1/conversations/:id | 대화 상세 |
+| POST | /api/v1/conversations | 새 대화 생성 |
+| GET | /api/v1/conversations/:id/messages | 메시지 목록 |
+| POST | /api/v1/conversations/:id/messages | 텍스트 메시지 전송 |
+| POST | /api/v1/conversations/:id/audio | 오디오 메시지 전송 |
+
+### 테스트 결과
+```
+Api::V1::Conversations
+  Conversation CRUD
+    GET /api/v1/conversations
+      ✓ returns empty array when no conversations exist
+      ✓ returns list of conversations
+      ✓ returns conversations ordered by most recent
+      ✓ only returns conversations for current user
+    GET /api/v1/conversations/:id
+      ✓ returns conversation details
+      ✓ returns 404 for non-existent conversation
+    POST /api/v1/conversations
+      ✓ creates a new conversation with title
+      ✓ creates conversation without title
+  Conversation Messages
+    GET /api/v1/conversations/:id/messages
+      ✓ returns empty array when no messages
+      ✓ returns messages in chronological order
+    POST /api/v1/conversations/:id/messages
+      ✓ processes text message and returns AI response
+      ✓ creates user and assistant messages
+      ✓ returns error for blank message
+  Conversation Audio
+    POST /api/v1/conversations/:id/audio
+      ✓ processes audio and returns AI response
+      ✓ creates user and assistant messages
+      ✓ returns error for missing audio data
+      ✓ returns error for invalid base64 data
+
+165 examples, 0 failures (27개 추가)
+```
+
+### CI 에러 및 해결
+1. **RuboCop SpaceInsideArrayLiteralBrackets**
+   - 배열 내부 공백 누락 → `bundle exec rubocop -A`로 자동 수정
+
+2. **ESLint unused-vars (main 머지 후)**
+   - main에 머지된 hotfix 코드와 동기화 필요 → `git merge origin/main`
+
+### Screenshot
+[docs/screenshots/04_ai/phase4-2.png]
+
+---
+
+## Phase 4.3 - Frontend AI Integration
+
+### [2026-01-15] Frontend API 연동
+
+#### 요청
+Frontend에서 Backend AI API와 연동하여 실제 음성 대화 기능 구현
+
+#### 생성/수정 파일
+```
+frontend/src/
+├── services/
+│   ├── api.ts                    (conversationApi 추가)
+│   └── conversationService.ts    (신규)
+├── pages/
+│   └── Conversation.tsx          (실제 API 연동)
+└── __tests__/
+    ├── services/
+    │   └── conversationService.test.ts  (신규)
+    └── pages/
+        └── Conversation.test.tsx        (업데이트)
+```
+
+#### 핵심 코드
+
+**services/api.ts - conversationApi**
+```typescript
+export const conversationApi = {
+  create: () => fetchApi<{ conversation: ConversationDetail }>('/conversations', { method: 'POST' }),
+  getAll: () => fetchApi<{ conversations: ConversationSummary[] }>('/conversations'),
+  getById: (id: number) => fetchApi<{ conversation: ConversationDetail }>(`/conversations/${id}`),
+  getMessages: (id: number) => fetchApi<{ messages: MessageData[] }>(`/conversations/${id}/messages`),
+  sendMessage: (conversationId: number, content: string) => fetchApi<SendMessageResponse>(...),
+  sendAudio: (conversationId: number, audioBlob: Blob, contentType: string) => fetchApiWithFormData<AudioSendResponse>(...),
+};
+```
+
+**services/conversationService.ts - 에러 처리**
+```typescript
+export type ConversationErrorCode =
+  | 'SESSION_CREATE_FAILED'
+  | 'SESSION_NOT_FOUND'
+  | 'AUDIO_UPLOAD_FAILED'
+  | 'TRANSCRIPTION_FAILED'
+  | 'AI_RESPONSE_FAILED'
+  | 'NETWORK_ERROR'
+  | 'INVALID_AUDIO';
+
+export async function createSession(): Promise<...>
+export async function sendAudioMessage(conversationId, audioBlob, contentType): Promise<...>
+```
+
+**pages/Conversation.tsx - 상태 관리**
+```typescript
+type ConversationState = 'idle' | 'recording' | 'processing' | 'playing' | 'error';
+
+// useAudioRecorder 훅 연동
+const { state, audioBlob, duration, startRecording, stopRecording, resetRecording, error } = useAudioRecorder();
+
+// 녹음 완료 시 자동 전송
+useEffect(() => {
+  if (audioBlob && recordingState === 'stopped') {
+    processAudio();
+  }
+}, [audioBlob, recordingState]);
+```
+
+#### 테스트 결과
+```
+Test Files  12 passed (12)
+     Tests  59 passed (59)
+```
+
+#### 빌드 에러 수정
+1. **ReactNode import** → `import type { ReactNode }` 사용
+2. **global 변수** → `vi.stubGlobal()` 사용
+3. **vite.config.ts** → `vitest/config`에서 defineConfig import
+
+#### 아키텍처 플로우
+```
+[마이크 녹음] → [useAudioRecorder] → [Conversation.tsx]
+    ↓
+[conversationService] → [conversationApi] → [Backend API]
+    ↓
+[STT → LLM → TTS] → [응답 오디오 재생]
+```
+
+### Screenshot
+[docs/screenshots/04_ai/phase4-3.png]
+
+---
+
