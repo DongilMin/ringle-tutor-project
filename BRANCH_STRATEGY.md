@@ -4,6 +4,56 @@
 
 ---
 
+## ⚠️ 멀티 에이전트 환경: Git Worktree
+
+### 문제점
+여러 Claude 에이전트(개발, 리뷰, 수정)가 동일한 디렉토리에서 작업하면 `git checkout` 시 충돌 발생.
+
+### 해결책: Git Worktree
+각 에이전트가 **독립된 디렉토리**에서 작업하여 브랜치 충돌 방지.
+
+```
+/Users/mindong-il/
+├── ringle-tutor/           ← 개발 에이전트 (Opus)
+│   └── 브랜치: main 또는 phase-X.Y
+├── ringle-tutor-review/    ← 리뷰 에이전트 (Sonnet)
+│   └── 브랜치: review-workspace (origin/main 추적)
+└── ringle-tutor-fix/       ← 수정 에이전트 (Sonnet)
+    └── 브랜치: fix-workspace (origin/main 추적)
+```
+
+### Worktree 설정 (최초 1회) - ✅ 설정 완료
+```bash
+cd /Users/mindong-il/ringle-tutor
+git worktree add ../ringle-tutor-review -b review-workspace origin/main
+git worktree add ../ringle-tutor-fix -b fix-workspace origin/main
+```
+
+### 현재 Worktree 상태
+```
+/Users/mindong-il/ringle-tutor         [main]
+/Users/mindong-il/ringle-tutor-fix     [fix-workspace]
+/Users/mindong-il/ringle-tutor-review  [review-workspace]
+```
+
+### 에이전트별 작업 디렉토리
+| 에이전트 | 디렉토리 | 브랜치 | 푸시 대상 |
+|----------|----------|--------|-----------|
+| 개발 (Opus) | `/ringle-tutor/` | phase-X.Y | `origin/phase-X.Y` |
+| 리뷰 (Sonnet) | `/ringle-tutor-review/` | review-workspace | `origin main` |
+| 수정 (Sonnet) | `/ringle-tutor-fix/` | fix-workspace | `origin main` |
+
+### 리뷰/수정 에이전트 푸시 방법
+```bash
+# review-workspace → main으로 푸시
+git push origin review-workspace:main
+
+# fix-workspace → main으로 푸시
+git push origin fix-workspace:main
+```
+
+---
+
 ## 브랜치 구조 (플랫)
 
 ```
@@ -57,6 +107,7 @@ phase-2.5────────────────────●
 ## 에이전트별 권한
 
 ### 개발 에이전트 (Opus)
+**디렉토리: `/ringle-tutor/`**
 - ✅ phase-X.x 브랜치 생성
 - ✅ phase-X.x 브랜치에 커밋 & 푸시
 - ❌ main 브랜치 커밋 금지
@@ -64,16 +115,21 @@ phase-2.5────────────────────●
 - ❌ Merge 금지
 
 ### 리뷰 에이전트 (Sonnet Reviewer)
-- ✅ docs/CodeReview/ 파일 작성
-- ❌ 코드 수정 금지
-- ❌ 커밋 금지
+**디렉토리: `/ringle-tutor-review/`**
+**브랜치: `review-workspace`**
+- ✅ docs/CodeReview/ 파일 작성 및 커밋
+- ✅ `git show origin/phase-X.Y:파일`로 원격 코드 확인
+- ✅ `git push origin review-workspace:main`으로 푸시
+- ❌ 코드 파일 수정 금지
+- ❌ `git checkout` 금지
 
 ### 수정 에이전트 (Sonnet Fixer)
-- ✅ 코드 수정
-- ✅ phase-X.x 브랜치에 커밋 & 푸시
-- ❌ main 브랜치 커밋 금지
-- ❌ PR 생성 금지
-- ❌ Merge 금지
+**디렉토리: `/ringle-tutor-fix/`**
+**브랜치: `fix-workspace`**
+- ✅ 코드 수정 및 커밋
+- ✅ `git push origin fix-workspace:main`으로 푸시
+- ✅ hotfix/이슈명 브랜치 생성 가능
+- ❌ phase-X.x 브랜치 직접 수정 금지
 
 ### 사용자 (Human)
 - ✅ PR 생성
