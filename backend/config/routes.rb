@@ -19,7 +19,13 @@ Rails.application.routes.draw do
       resources :payments, only: [ :index, :show, :create ]
 
       # Conversations (requires active membership)
-      resources :conversations, only: [ :index, :create ]
+      resources :conversations, only: [:index, :show, :create] do
+        member do
+          get :messages
+          post :messages, action: :send_message
+          post :audio, action: :send_audio
+        end
+      end
 
       # Admin endpoints
       namespace :admin do

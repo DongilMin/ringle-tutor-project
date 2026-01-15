@@ -6,6 +6,12 @@ FactoryBot.define do
     end_date { Date.current + 30.days }
     status { 'active' }
 
+    trait :active do
+      status { 'active' }
+      start_date { Date.current - 10.days }
+      end_date { Date.current + 20.days }
+    end
+
     trait :premium do
       membership_type { 'premium' }
     end
