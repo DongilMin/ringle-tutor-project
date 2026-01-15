@@ -1,44 +1,147 @@
-import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import Conversation from "../../pages/Conversation";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import Conversation from '../../pages/Conversation';
+import * as conversationService from '../../services/conversationService';
 
-describe("Conversation Page", () => {
-  it("renders conversation title", () => {
-    render(<Conversation />);
+// Mock the conversationService
+vi.mock('../../services/conversationService', () => ({
+  createSession: vi.fn(),
+  sendAudioMessage: vi.fn(),
+}));
 
-    expect(screen.getByText("AI English Tutor")).toBeInTheDocument();
+// Mock useAudioRecorder hook
+vi.mock('../../hooks/useAudioRecorder', () => ({
+  useAudioRecorder: () => ({
+    state: 'idle',
+    audioBlob: null,
+    audioUrl: null,
+    duration: 0,
+    startRecording: vi.fn(),
+    stopRecording: vi.fn(),
+    pauseRecording: vi.fn(),
+    resumeRecording: vi.fn(),
+    resetRecording: vi.fn(),
+    error: null,
+    mediaStream: null,
+  }),
+}));
+
+describe('Conversation Page', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("renders initial AI greeting message", () => {
+  it('renders conversation title', async () => {
+    vi.mocked(conversationService.createSession).mockResolvedValue({
+      success: true,
+      conversationId: 1,
+      messages: [],
+    });
+
     render(<Conversation />);
 
-    expect(
-      screen.getByText(/Hello! I'm your AI English tutor/)
-    ).toBeInTheDocument();
+    expect(screen.getByText('AI English Tutor')).toBeInTheDocument();
   });
 
-  it("renders start recording button initially", () => {
+  it('shows loading state initially', async () => {
+    vi.mocked(conversationService.createSession).mockResolvedValue({
+      success: true,
+      conversationId: 1,
+      messages: [],
+    });
+
     render(<Conversation />);
 
-    expect(screen.getByText("Start Recording")).toBeInTheDocument();
+    expect(screen.getByText('Loading...')).toBeInTheDocument();
   });
 
-  it("shows stop recording button when recording starts", () => {
+  it('shows welcome message after session is created', async () => {
+    vi.mocked(conversationService.createSession).mockResolvedValue({
+      success: true,
+      conversationId: 1,
+      messages: [],
+    });
+
     render(<Conversation />);
 
-    fireEvent.click(screen.getByText("Start Recording"));
-
-    expect(screen.getByText("Stop Recording")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/Hello! I'm your AI English tutor/)).toBeInTheDocument();
+    });
   });
 
-  it("adds user message when recording stops", () => {
+  it('shows start recording button after initialization', async () => {
+    vi.mocked(conversationService.createSession).mockResolvedValue({
+      success: true,
+      conversationId: 1,
+      messages: [],
+    });
+
     render(<Conversation />);
 
-    fireEvent.click(screen.getByText("Start Recording"));
-    fireEvent.click(screen.getByText("Stop Recording"));
+    await waitFor(() => {
+      expect(screen.getByText('Start Recording')).toBeInTheDocument();
+    });
+  });
 
-    expect(
-      screen.getByText("This is a sample user message from recording.")
-    ).toBeInTheDocument();
+  it('displays error when session creation fails', async () => {
+    vi.mocked(conversationService.createSession).mockResolvedValue({
+      success: false,
+      error: {
+        code: 'SESSION_CREATE_FAILED',
+        message: 'Failed to start conversation. Please try again.',
+      },
+    });
+
+    render(<Conversation />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Failed to start conversation. Please try again.')
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('displays existing messages from restored session', async () => {
+    vi.mocked(conversationService.createSession).mockResolvedValue({
+      success: true,
+      conversationId: 1,
+      messages: [
+        {
+          id: '1',
+          content: 'Welcome back!',
+          sender: 'ai',
+          timestamp: new Date(),
+        },
+        {
+          id: '2',
+          content: 'Hello tutor',
+          sender: 'user',
+          timestamp: new Date(),
+        },
+      ],
+    });
+
+    render(<Conversation />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Welcome back!')).toBeInTheDocument();
+      expect(screen.getByText('Hello tutor')).toBeInTheDocument();
+    });
+  });
+
+  it('shows retry button when error occurs', async () => {
+    vi.mocked(conversationService.createSession).mockResolvedValue({
+      success: false,
+      error: {
+        code: 'SESSION_CREATE_FAILED',
+        message: 'Failed to start conversation. Please try again.',
+      },
+    });
+
+    render(<Conversation />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Retry')).toBeInTheDocument();
+    });
   });
 });

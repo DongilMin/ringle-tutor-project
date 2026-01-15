@@ -899,3 +899,94 @@ Api::V1::Conversations
 
 ---
 
+## Phase 4.3 - Frontend AI Integration
+
+### [2026-01-15] Frontend API 연동
+
+#### 요청
+Frontend에서 Backend AI API와 연동하여 실제 음성 대화 기능 구현
+
+#### 생성/수정 파일
+```
+frontend/src/
+├── services/
+│   ├── api.ts                    (conversationApi 추가)
+│   └── conversationService.ts    (신규)
+├── pages/
+│   └── Conversation.tsx          (실제 API 연동)
+└── __tests__/
+    ├── services/
+    │   └── conversationService.test.ts  (신규)
+    └── pages/
+        └── Conversation.test.tsx        (업데이트)
+```
+
+#### 핵심 코드
+
+**services/api.ts - conversationApi**
+```typescript
+export const conversationApi = {
+  create: () => fetchApi<{ conversation: ConversationDetail }>('/conversations', { method: 'POST' }),
+  getAll: () => fetchApi<{ conversations: ConversationSummary[] }>('/conversations'),
+  getById: (id: number) => fetchApi<{ conversation: ConversationDetail }>(`/conversations/${id}`),
+  getMessages: (id: number) => fetchApi<{ messages: MessageData[] }>(`/conversations/${id}/messages`),
+  sendMessage: (conversationId: number, content: string) => fetchApi<SendMessageResponse>(...),
+  sendAudio: (conversationId: number, audioBlob: Blob, contentType: string) => fetchApiWithFormData<AudioSendResponse>(...),
+};
+```
+
+**services/conversationService.ts - 에러 처리**
+```typescript
+export type ConversationErrorCode =
+  | 'SESSION_CREATE_FAILED'
+  | 'SESSION_NOT_FOUND'
+  | 'AUDIO_UPLOAD_FAILED'
+  | 'TRANSCRIPTION_FAILED'
+  | 'AI_RESPONSE_FAILED'
+  | 'NETWORK_ERROR'
+  | 'INVALID_AUDIO';
+
+export async function createSession(): Promise<...>
+export async function sendAudioMessage(conversationId, audioBlob, contentType): Promise<...>
+```
+
+**pages/Conversation.tsx - 상태 관리**
+```typescript
+type ConversationState = 'idle' | 'recording' | 'processing' | 'playing' | 'error';
+
+// useAudioRecorder 훅 연동
+const { state, audioBlob, duration, startRecording, stopRecording, resetRecording, error } = useAudioRecorder();
+
+// 녹음 완료 시 자동 전송
+useEffect(() => {
+  if (audioBlob && recordingState === 'stopped') {
+    processAudio();
+  }
+}, [audioBlob, recordingState]);
+```
+
+#### 테스트 결과
+```
+Test Files  12 passed (12)
+     Tests  59 passed (59)
+```
+
+#### 빌드 에러 수정
+1. **ReactNode import** → `import type { ReactNode }` 사용
+2. **global 변수** → `vi.stubGlobal()` 사용
+3. **vite.config.ts** → `vitest/config`에서 defineConfig import
+
+#### 아키텍처 플로우
+```
+[마이크 녹음] → [useAudioRecorder] → [Conversation.tsx]
+    ↓
+[conversationService] → [conversationApi] → [Backend API]
+    ↓
+[STT → LLM → TTS] → [응답 오디오 재생]
+```
+
+### Screenshot
+[docs/screenshots/04_ai/phase4-3.png]
+
+---
+
