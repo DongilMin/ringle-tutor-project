@@ -14,8 +14,10 @@
 | 2.4 | phase_2_4_membership_api.md | ⏳ 대기 | - | - |
 | 2.5 | phase_2_5_membership_check.md | ⏳ 대기 | - | - |
 | 2.6 | phase_2_6_payment_service.md | ⏳ 대기 | - | - |
+| 3.1 | phase_3_1_basic_ui.md | ⚠️ 수정필요 | ⏳ 대기 | Sonnet (Reviewer) |
 | 3.2 | phase_3_2_audio_feature.md | ✅ 완료 | ✅ 수정 완료 | Opus (Fixer) |
-| 4.1 | phase_4_1_ai_services.md | ⏳ 대기 | - | - |
+| 3.3 | phase_3_3_state_management.md | ⚠️ 수정필요 | ⏳ 대기 | Sonnet (Reviewer) |
+| 4.1 | phase_4_1_stt_tts.md | ⚠️ 수정필요 | ⏳ 대기 | Sonnet (Reviewer) |
 
 ---
 

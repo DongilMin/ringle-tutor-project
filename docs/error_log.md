@@ -9,7 +9,8 @@
 1. [Phase 2.6 - Payment Service](#phase-26---payment-service)
 2. [Phase 3.1 - Basic UI](#phase-31---basic-ui)
 3. [Phase 3.2 - Audio Features](#phase-32---audio-features)
-4. [전체 요약](#전체-요약)
+4. [Phase 4.1 - STT/TTS Services](#phase-41---stttts-services)
+5. [전체 요약](#전체-요약)
 
 ---
 
@@ -834,15 +835,265 @@ for (let i = 0; i < bufferLength; i += sampleRate) {
 
 ---
 
+## Phase 4.1 - STT/TTS Services
+
+### 🔴 Critical Issues
+
+#### 18. Base64 디코딩 예외 처리 누락
+
+**파일**: `backend/app/services/tts_service.rb:107`
+
+**문제**:
+```ruby
+def parse_response(response, format)
+  raise ApiError, "Invalid response format" unless response.is_a?(Hash)
+  raise ApiError, response["error"] if response["error"].present?
+
+  audio_data = response["audio_data"]
+  raise ApiError, "No audio data in response" if audio_data.blank?
+
+  {
+    audio_data: Base64.strict_decode64(audio_data),  # ← ArgumentError 가능
+    format: format,
+    duration: response["duration"],
+    content_type: format
+  }
+end
+```
+- `Base64.strict_decode64`가 잘못된 형식일 때 `ArgumentError` 발생
+- 예외 처리 없음 → 서비스 중단
+
+**해결책**:
+```ruby
+def parse_response(response, format)
+  raise ApiError, "Invalid response format" unless response.is_a?(Hash)
+  raise ApiError, response["error"] if response["error"].present?
+
+  audio_data = response["audio_data"]
+  raise ApiError, "No audio data in response" if audio_data.blank?
+
+  begin
+    decoded_audio = Base64.strict_decode64(audio_data)
+  rescue ArgumentError => e
+    raise ApiError, "Invalid Base64 encoding: #{e.message}"
+  end
+
+  {
+    audio_data: decoded_audio,
+    format: format,
+    duration: response["duration"],
+    content_type: format
+  }
+end
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 19. 에러 타입 불일치 (TtsService)
+
+**파일**: `backend/app/services/tts_service.rb:51`
+
+**문제**:
+```ruby
+def validate_voice!(voice)
+  return if SUPPORTED_VOICES.include?(voice)
+
+  raise InvalidTextError, "Unsupported voice: #{voice}"  # ← 잘못된 에러 타입
+end
+```
+- 음성 관련 에러인데 `InvalidTextError`를 발생시킴
+- 에러 핸들링 시 혼란, 클라이언트가 구분 불가
+
+**해결책**:
+```ruby
+class InvalidVoiceError < TtsError; end  # 새 에러 클래스 추가 (라인 11)
+
+def validate_voice!(voice)
+  return if SUPPORTED_VOICES.include?(voice)
+
+  raise InvalidVoiceError, "Unsupported voice: #{voice}. Supported: #{SUPPORTED_VOICES.join(', ')}"
+end
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+#### 20. 네트워크 재시도 로직 없음
+
+**파일**: `backend/app/services/stt_service.rb:45`, `backend/app/services/tts_service.rb:58`
+
+**문제**:
+- 일시적 네트워크 오류(502, 503, Timeout) 시 즉시 실패
+- 재시도 로직 없음
+
+**시나리오**:
+- API 가용성 99.9%라도 1000번 중 1번 실패
+- 사용자 경험 악화
+- 대화 중단 → 멤버십 시간 낭비
+
+**해결책**:
+```ruby
+def call_stt_api_with_retry(audio_data, content_type, language, max_retries: 3)
+  retries = 0
+  begin
+    call_stt_api(audio_data, content_type, language)
+  rescue ApiError, Timeout::Error => e
+    retries += 1
+    if retries < max_retries && retryable_error?(e)
+      sleep(2**retries)  # Exponential backoff: 2초, 4초, 8초
+      retry
+    else
+      raise
+    end
+  end
+end
+
+def retryable_error?(error)
+  return true if error.is_a?(Timeout::Error)
+  return true if error.message =~ /502|503|504/  # Gateway errors
+  false
+end
+```
+
+**상태**: ⚠️ 수정 필요
+**우선순위**: P0
+
+---
+
+### 🟡 Warnings
+
+#### 21. 코드 중복 (DRY 원칙 위반)
+
+**파일**: `backend/app/services/stt_service.rb`, `backend/app/services/tts_service.rb`
+
+**문제**:
+- 두 서비스가 거의 동일한 구조
+- Net::HTTP 호출, 에러 처리, Mock 분기 중복
+- 유지보수성 저하
+
+**현재 상황**:
+- 동일한 패턴: `validate_*!`, `call_*_api`, `real_api_call`, `parse_response`
+- 동일한 상수: `DEFAULT_TIMEOUT`
+- 동일한 에러 계층: `ApiError`, `TimeoutError`
+
+**해결책**:
+```ruby
+# app/services/concerns/external_api_callable.rb
+module ExternalApiCallable
+  extend ActiveSupport::Concern
+
+  DEFAULT_TIMEOUT = 30
+
+  def call_external_api(endpoint, headers, body, timeout: DEFAULT_TIMEOUT)
+    uri = URI.parse(endpoint)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == "https"
+    http.open_timeout = timeout
+    http.read_timeout = timeout
+
+    request = Net::HTTP::Post.new(uri.path)
+    headers.each { |key, value| request[key] = value }
+    request.body = body
+
+    response = http.request(request)
+    raise ApiError, "API returned #{response.code}: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
+
+    JSON.parse(response.body)
+  end
+end
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+#### 22. 타임아웃 설정 불가
+
+**파일**: `backend/app/services/stt_service.rb:14`, `backend/app/services/tts_service.rb:14`
+
+**문제**:
+```ruby
+def initialize(api_key: nil)
+  @api_key = api_key || ENV.fetch("TTS_API_KEY", nil)
+end
+```
+- `DEFAULT_TIMEOUT = 30`으로 고정
+- 긴 오디오/텍스트 처리 시 부족할 수 있음
+
+**해결책**:
+```ruby
+def initialize(api_key: nil, timeout: DEFAULT_TIMEOUT)
+  @api_key = api_key || ENV.fetch("TTS_API_KEY", nil)
+  @timeout = timeout
+end
+
+def real_api_call(text, voice, format)
+  # ...
+  http.open_timeout = @timeout
+  http.read_timeout = @timeout
+  # ...
+end
+```
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
+#### 23. TTS 캐싱 없음
+
+**파일**: `backend/app/services/tts_service.rb:27`
+
+**문제**:
+- 동일한 텍스트/음성 조합을 반복 요청 시 매번 API 호출
+- 자주 사용되는 튜토리얼 문구 반복 생성 → 비용/시간 낭비
+
+**시나리오**:
+- "Hello, let's start the lesson!" (튜토리얼 시작 멘트)
+- "Great job! Let's continue." (칭찬 멘트)
+
+**해결책**:
+```ruby
+# config/initializers/cache.rb
+Rails.application.config.tts_cache = ActiveSupport::Cache::MemoryStore.new(size: 100.megabytes)
+
+# tts_service.rb
+def synthesize(text, voice: DEFAULT_VOICE, format: DEFAULT_FORMAT)
+  cache_key = "tts:#{Digest::SHA256.hexdigest("#{text}:#{voice}:#{format}")}"
+
+  cached = Rails.application.config.tts_cache.fetch(cache_key)
+  return cached if cached.present?
+
+  result = synthesize_uncached(text, voice, format)
+  Rails.application.config.tts_cache.write(cache_key, result, expires_in: 1.hour)
+  result
+end
+```
+
+**예상 효과**:
+- API 호출 50% 감소 (반복 문구 많은 경우)
+- 응답 시간 2-3초 → 10ms
+
+**상태**: ⚠️ 개선 권장
+**우선순위**: P1
+
+---
+
 ## 전체 요약
 
 ### 통계
 
 | 카테고리 | 개수 |
 |---------|------|
-| 🔴 Critical Issues | 10개 |
-| 🟡 Warnings | 7개 |
-| **총계** | **17개** |
+| 🔴 Critical Issues | 13개 |
+| 🟡 Warnings | 10개 |
+| **총계** | **23개** |
 
 ### Phase별 분포
 
@@ -851,13 +1102,14 @@ for (let i = 0; i < bufferLength; i += sampleRate) {
 | 2.6 - Payment Service | 2개 | 2개 | 4개 |
 | 3.1 - Basic UI | 4개 | 3개 | 7개 |
 | 3.2 - Audio Features | 3개 | 3개 | 6개 |
+| 4.1 - STT/TTS Services | 3개 | 3개 | 6개 |
 
 ### 우선순위별 분포
 
 | 우선순위 | 개수 | 이슈 번호 |
 |---------|------|----------|
-| P0 (즉시 수정) | 10개 | #1, #2, #5, #6, #7, #8, #12, #13, #14 |
-| P1 (1주일 내) | 6개 | #4, #9, #10, #11, #15, #16 |
+| P0 (즉시 수정) | 13개 | #1, #2, #5, #6, #7, #8, #12, #13, #14, #18, #19, #20 |
+| P1 (1주일 내) | 9개 | #4, #9, #10, #11, #15, #16, #17, #21, #22, #23 |
 | P2 (다음 스프린트) | 1개 | #3 |
 
 ### 카테고리별 분류
@@ -867,23 +1119,29 @@ for (let i = 0; i < bufferLength; i += sampleRate) {
 - #2: PG 취소 로직 부재
 - #5: 가격 정보 불일치
 
-#### 에러 처리 (2개)
+#### 에러 처리 (5개)
 - #7: API 에러 처리 없음
 - #13: 메모리 누수
+- #18: Base64 디코딩 예외 처리 누락
+- #19: 에러 타입 불일치 (TtsService)
+- #20: 네트워크 재시도 로직 없음
 
 #### 브라우저 호환성 (1개)
 - #12: audio/webm 미지원
 
-#### 성능 (3개)
+#### 성능 (4개)
 - #14: AudioContext 재생성
 - #15: 타임슬라이스 100ms
 - #17: Waveform 루프 최적화
+- #23: TTS 캐싱 없음
 
-#### 코드 품질 (4개)
+#### 코드 품질 (6개)
 - #3: 가격 하드코딩
 - #4: ResponseRenderer 미사용
 - #9: 인라인 스타일
 - #16: 중복 호출 방지
+- #21: 코드 중복 (STT/TTS)
+- #22: 타임아웃 설정 불가
 
 #### UX (4개)
 - #6: Enterprise 플랜 누락
@@ -912,12 +1170,22 @@ for (let i = 0; i < bufferLength; i += sampleRate) {
 3. Effect 분리 (AudioContext vs 그리기)
 4. 추가 테스트 (Pause/Resume, Duration)
 
+### Phase 4.1 후속 작업
+1. Base64 디코딩 예외 처리 추가 (ArgumentError → ApiError)
+2. InvalidVoiceError 클래스 추가, validate_voice! 수정
+3. 재시도 로직 구현 (exponential backoff, 최대 3회)
+4. BaseApiService 추상화 (코드 중복 제거)
+5. 타임아웃 설정 가능하도록 initialize(timeout:) 추가
+6. TTS 캐싱 시스템 구현 (Rails.cache 활용)
+7. 구조화된 로깅 추가 (duration, payload size)
+
 ---
 
 ## 테스트 결과
 
 ### Backend (RSpec)
 - Phase 2.6: 105개 테스트 전체 통과
+- Phase 4.1: STT/TTS 서비스 테스트 전체 통과
 
 ### Frontend (Vitest)
 - Phase 3.1: 19개 테스트 전체 통과
