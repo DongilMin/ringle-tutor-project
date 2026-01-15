@@ -12,6 +12,8 @@ class Conversation < ApplicationRecord
 
   validates :status, presence: true, inclusion: { in: STATUSES.values }
 
+  before_validation :set_default_title, if: -> { title.blank? }
+
   scope :active, -> { where(status: STATUSES[:active]) }
   scope :recent, -> { order(updated_at: :desc) }
 
@@ -28,8 +30,15 @@ class Conversation < ApplicationRecord
   end
 
   def message_history
-    messages.order(:created_at).map do |msg|
-      { role: msg.role, content: msg.content }
-    end
+    messages
+      .order(:created_at)
+      .select(:id, :role, :content, :created_at)
+      .map { |msg| { role: msg.role, content: msg.content } }
+  end
+
+  private
+
+  def set_default_title
+    self.title = "Conversation #{Time.current.strftime('%Y-%m-%d %H:%M')}"
   end
 end

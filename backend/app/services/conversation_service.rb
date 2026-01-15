@@ -4,6 +4,8 @@ class ConversationService
   class ConversationError < StandardError; end
   class ProcessingError < ConversationError; end
 
+  MAX_CONTEXT_MESSAGES = 20
+
   def initialize(stt_service: nil, llm_service: nil, tts_service: nil)
     @stt_service = stt_service || SttService.new
     @llm_service = llm_service || LlmService.new
@@ -77,9 +79,17 @@ class ConversationService
   end
 
   def generate_response(conversation)
-    context = conversation.message_history
-    last_user_message = context.last[:content]
-    @llm_service.chat(last_user_message, context: context[0..-2])
+    all_messages = conversation.message_history
+    last_user_message = all_messages.last[:content]
+
+    # Limit context to recent N messages to avoid token overflow
+    context = if all_messages.size > MAX_CONTEXT_MESSAGES
+                all_messages[-(MAX_CONTEXT_MESSAGES)..-2] || []
+    else
+                all_messages[0..-2]
+    end
+
+    @llm_service.chat(last_user_message, context: context)
   end
 
   def synthesize_speech(text)

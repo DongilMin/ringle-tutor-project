@@ -15,9 +15,16 @@ class MessageSerializer < BaseSerializer
   def as_json_with_audio
     return as_json unless object.has_audio?
 
+    begin
+      audio_base64 = Base64.strict_encode64(object.audio_data)
+    rescue ArgumentError, TypeError => e
+      Rails.logger.error("Audio encoding failed for message #{object.id}: #{e.message}")
+      return as_json.merge(audio_error: "Audio data corrupted")
+    end
+
     as_json.merge(
       audio: {
-        data: Base64.strict_encode64(object.audio_data),
+        data: audio_base64,
         content_type: object.audio_content_type,
         duration: object.audio_duration
       }

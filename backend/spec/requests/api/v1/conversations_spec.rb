@@ -206,11 +206,11 @@ RSpec.describe 'Api::V1::Conversations', type: :request do
         expect(json_response['data']['title']).to eq('English Practice')
       end
 
-      it 'creates conversation without title' do
+      it 'creates conversation without title and assigns default title' do
         post '/api/v1/conversations'
 
         expect(response).to have_http_status(:created)
-        expect(json_response['data']['title']).to be_nil
+        expect(json_response['data']['title']).to match(/^Conversation \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
       end
     end
   end

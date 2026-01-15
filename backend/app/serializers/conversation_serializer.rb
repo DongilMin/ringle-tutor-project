@@ -13,10 +13,12 @@ class ConversationSerializer < BaseSerializer
   end
 
   def as_json_with_messages
-    as_json.merge(
-      messages: object.messages.chronological.map do |message|
-        MessageSerializer.new(message).as_json
-      end
-    )
+    # Select only needed columns to avoid loading audio_data
+    messages_data = object.messages
+      .chronological
+      .select(:id, :role, :content, :audio_content_type, :audio_duration, :created_at)
+      .map { |msg| MessageSerializer.new(msg).as_json }
+
+    as_json.merge(messages: messages_data)
   end
 end
