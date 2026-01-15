@@ -1345,5 +1345,50 @@ $ npm run lint && npm test -- --run
 
 ---
 
+## Phase 4.2 - Conversation API
+
+### CI 에러 #1: RuboCop SpaceInsideArrayLiteralBrackets
+
+**발생 일시**: 2026-01-15
+**브랜치**: `phase-4.2`
+
+**에러 메시지**:
+```
+config/routes.rb:22:39: C: Layout/SpaceInsideArrayLiteralBrackets: Use space inside array brackets.
+db/migrate/20260115103944_create_conversations.rb:11:31: C: Layout/SpaceInsideArrayLiteralBrackets
+db/migrate/20260115103950_create_messages.rb:14:26: C: Layout/SpaceInsideArrayLiteralBrackets
+```
+
+**원인**:
+- 배열 리터럴 내부에 공백 누락
+- RuboCop의 `Layout/SpaceInsideArrayLiteralBrackets` 규칙 위반
+
+**문제 코드**:
+```ruby
+# routes.rb
+resources :conversations, only: [:index, :show, :create]  # ❌
+
+# migration
+add_index :conversations, [:user_id, :status]  # ❌
+```
+
+**해결책**:
+```ruby
+# routes.rb
+resources :conversations, only: [ :index, :show, :create ]  # ✅
+
+# migration
+add_index :conversations, [ :user_id, :status ]  # ✅
+```
+
+**해결 명령어**:
+```bash
+bundle exec rubocop -A config/routes.rb db/migrate/20260115103944_create_conversations.rb db/migrate/20260115103950_create_messages.rb
+```
+
+**상태**: ✅ 해결 완료
+
+---
+
 **마지막 업데이트**: 2026-01-15
 **리뷰어**: Code Review Agent (Claude Sonnet 4.5)

@@ -178,16 +178,29 @@
 
 **전체 테스트:** 33 examples, 0 failures
 
-### 4.2 대화 API
-**예상 파일:** `app/controllers/api/v1/conversations_controller.rb`
+### 4.2 대화 API ✅ COMPLETED (phase-4.2)
 
-#### 4.2.1 대화 엔드포인트
-- [ ] `POST /api/v1/conversations` 엔드포인트
-- [ ] 오디오 업로드 처리
-- [ ] STT → LLM → TTS 파이프라인
-- [ ] 응답 스트리밍
-- [ ] Request Spec
-- [ ] `/checkpoint "대화 API"` 실행
+#### 4.2.1 모델
+**파일:** `app/models/conversation.rb`, `app/models/message.rb`
+- [x] Conversation 모델 (user 연결, status 관리)
+- [x] Message 모델 (role, content, audio_data)
+
+#### 4.2.2 서비스
+**파일:** `app/services/conversation_service.rb`
+- [x] ConversationService (STT→LLM→TTS 파이프라인)
+- [x] process_audio(): 오디오 입력 처리
+- [x] process_text(): 텍스트 입력 처리
+
+#### 4.2.3 API 엔드포인트
+**파일:** `app/controllers/api/v1/conversations_controller.rb`
+- [x] GET /api/v1/conversations (목록)
+- [x] GET /api/v1/conversations/:id (상세)
+- [x] POST /api/v1/conversations (생성)
+- [x] GET /api/v1/conversations/:id/messages (메시지 목록)
+- [x] POST /api/v1/conversations/:id/messages (텍스트 전송)
+- [x] POST /api/v1/conversations/:id/audio (오디오 전송)
+
+**테스트:** 165 examples, 0 failures (27개 추가)
 
 ### 4.3 Frontend AI 연동
 

@@ -8,7 +8,8 @@ class MockMediaRecorder {
   ondataavailable: ((event: { data: Blob }) => void) | null = null;
   onstop: (() => void) | null = null;
 
-  constructor(_stream: MediaStream, _options?: MediaRecorderOptions) {}
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  constructor(stream: MediaStream, options?: MediaRecorderOptions) {}
 
   start = vi.fn(() => {
     this.state = 'recording';
@@ -29,7 +30,8 @@ class MockMediaRecorder {
     this.state = 'recording';
   });
 
-  static isTypeSupported(_mimeType: string): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  static isTypeSupported(mimeType: string): boolean {
     return true;
   }
 }
