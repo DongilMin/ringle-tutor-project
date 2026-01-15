@@ -1,5 +1,20 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
+// Helper function to convert Blob to base64
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result as string;
+      // Remove the data URL prefix (e.g., "data:audio/webm;base64,")
+      const base64Data = base64String.split(',')[1];
+      resolve(base64Data);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -139,56 +154,21 @@ interface AudioSendResponse {
   audio_duration?: number;
 }
 
-async function fetchApiWithFormData<T>(
-  endpoint: string,
-  formData: FormData
-): Promise<ApiResponse<T>> {
-  try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      method: 'POST',
-      body: formData,
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      return {
-        success: false,
-        error: data.error || {
-          code: `HTTP_${response.status}`,
-          message: `Request failed with status ${response.status}`,
-        },
-      };
-    }
-
-    return data;
-  } catch (error) {
-    return {
-      success: false,
-      error: {
-        code: 'NETWORK_ERROR',
-        message: error instanceof Error ? error.message : 'Network request failed',
-      },
-    };
-  }
-}
-
 export const conversationApi = {
   // Create a new conversation
   create: () =>
-    fetchApi<{ conversation: ConversationDetail }>('/conversations', {
+    fetchApi<ConversationSummary & { messages?: MessageData[] }>('/conversations', {
       method: 'POST',
     }),
 
   // Get all conversations
-  getAll: () => fetchApi<{ conversations: ConversationSummary[] }>('/conversations'),
+  getAll: () => fetchApi<ConversationSummary[]>('/conversations'),
 
   // Get a specific conversation
-  getById: (id: number) => fetchApi<{ conversation: ConversationDetail }>(`/conversations/${id}`),
+  getById: (id: number) => fetchApi<ConversationDetail>(`/conversations/${id}`),
 
   // Get messages for a conversation
-  getMessages: (id: number) =>
-    fetchApi<{ messages: MessageData[] }>(`/conversations/${id}/messages`),
+  getMessages: (id: number) => fetchApi<MessageData[]>(`/conversations/${id}/messages`),
 
   // Send a text message
   sendMessage: (conversationId: number, content: string) =>
@@ -197,15 +177,18 @@ export const conversationApi = {
       body: JSON.stringify({ content }),
     }),
 
-  // Send an audio message
-  sendAudio: (conversationId: number, audioBlob: Blob, contentType: string) => {
-    const formData = new FormData();
-    formData.append('audio', audioBlob, `recording.${contentType.split('/')[1] || 'webm'}`);
-    formData.append('content_type', contentType);
-    return fetchApiWithFormData<AudioSendResponse>(
-      `/conversations/${conversationId}/audio`,
-      formData
-    );
+  // Send an audio message (converts blob to base64)
+  sendAudio: async (conversationId: number, audioBlob: Blob, contentType: string) => {
+    const base64Data = await blobToBase64(audioBlob);
+    return fetchApi<AudioSendResponse>(`/conversations/${conversationId}/audio`, {
+      method: 'POST',
+      body: JSON.stringify({
+        audio: {
+          data: base64Data,
+          content_type: contentType,
+        },
+      }),
+    });
   },
 };
 

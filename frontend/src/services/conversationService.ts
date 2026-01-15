@@ -80,11 +80,11 @@ export async function createSession(): Promise<
     };
   }
 
-  const conversation = response.data.conversation;
+  const conversation = response.data;
   return {
     success: true,
     conversationId: conversation.id,
-    messages: conversation.messages.map(mapMessageToUI),
+    messages: conversation.messages ? conversation.messages.map(mapMessageToUI) : [],
   };
 }
 
@@ -109,11 +109,11 @@ export async function restoreSession(conversationId: number): Promise<
     };
   }
 
-  const conversation = response.data.conversation;
+  const conversation = response.data;
   return {
     success: true,
     conversation,
-    messages: conversation.messages.map(mapMessageToUI),
+    messages: conversation.messages ? conversation.messages.map(mapMessageToUI) : [],
   };
 }
 
@@ -233,6 +233,6 @@ export async function getConversationHistory(conversationId: number): Promise<
 
   return {
     success: true,
-    messages: response.data.messages.map(mapMessageToUI),
+    messages: Array.isArray(response.data) ? response.data.map(mapMessageToUI) : [],
   };
 }

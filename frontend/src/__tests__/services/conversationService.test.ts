@@ -42,7 +42,7 @@ describe('conversationService', () => {
 
       vi.mocked(conversationApi.create).mockResolvedValue({
         success: true,
-        data: { conversation: mockConversation },
+        data: mockConversation,
       });
 
       const result = await createSession();
@@ -184,7 +184,7 @@ describe('conversationService', () => {
 
       vi.mocked(conversationApi.getMessages).mockResolvedValue({
         success: true,
-        data: { messages: mockMessages },
+        data: mockMessages,
       });
 
       const result = await getConversationHistory(1);
