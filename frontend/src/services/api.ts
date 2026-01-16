@@ -153,6 +153,18 @@ export const checkMembership = async (userId?: number) => {
   }
 };
 
+// Fetch demo users from backend (for user selection)
+export interface DemoUser {
+  id: number;
+  email: string;
+  name: string;
+}
+
+export const getDemoUsers = async (): Promise<DemoUser[]> => {
+  const response = await api.get('/users');
+  return response.data.data || [];
+};
+
 export type MembershipType = 'basic' | 'premium' | 'enterprise';
 
 // Plan data from backend (Single Source of Truth)
