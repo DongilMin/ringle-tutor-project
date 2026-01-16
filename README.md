@@ -9,7 +9,7 @@ LLM API를 통해 대화형으로 영어 학습을 도와주는 풀스택 앱입
 | Backend | Ruby 3.3.6, Rails 8.1 API, SQLite |
 | Frontend | React 19, TypeScript, Vite |
 | Testing | RSpec (Backend), Vitest (Frontend) |
-| AI | Gemini API (LLM), OpenAI Whisper (STT), OpenAI TTS |
+| AI | OpenAI GPT-4o-mini (LLM), OpenAI Whisper (STT), OpenAI TTS |
 | 자동화 | Claude Code Hooks, husky, lint-staged |
 
 ## 설계 및 기술 스택 선정 배경
@@ -40,23 +40,24 @@ LLM API를 통해 대화형으로 영어 학습을 도와주는 풀스택 앱입
 
 ### AI 서비스 통합
 
-- **Gemini API (LLM)**: Google의 최신 LLM으로 자연스러운 영어 대화 및 교정
+- **OpenAI GPT-4o-mini (LLM)**: 빠른 응답 속도와 자연스러운 영어 대화 및 교정
 - **OpenAI Whisper (STT)**: 높은 정확도의 음성 인식, 다국어 지원
-- **OpenAI TTS**: 자연스러운 음성 합성, 다양한 음성 선택 가능
+- **OpenAI TTS**: 자연스러운 음성 합성, 다양한 음성 선택 가능 (alloy, echo, nova 등)
 - **분리된 서비스 구조**: 각 AI 서비스를 별도 클래스로 캡슐화하여 교체 용이
+- **SSE Streaming**: LLM 응답 실시간 스트리밍으로 체감 지연 시간 최소화
 
 ### 아키텍처 결정
 
 ```
-[Frontend]                    [Backend]                    [AI Services]
+[Frontend]                    [Backend]                    [OpenAI API]
     │                            │                              │
     │  REST API / SSE           │                              │
     ├──────────────────────────►│                              │
     │                            │  STT (Whisper)               │
     │                            ├─────────────────────────────►│
-    │                            │  LLM (Gemini)                │
+    │                            │  LLM (GPT-4o-mini)           │
     │                            ├─────────────────────────────►│
-    │                            │  TTS (OpenAI)                │
+    │                            │  TTS (tts-1)                 │
     │                            ├─────────────────────────────►│
     │◄───────────────────────────┤                              │
 ```
@@ -128,34 +129,43 @@ npm run dev
 
 ## API 키 설정
 
-`.env` 파일에 다음 키들을 설정하세요:
+`.env` 파일에 다음 키를 설정하세요:
 
 ```bash
-# LLM 서비스 (Gemini) - 대화 생성에 필요
-GEMINI_API_KEY=your_gemini_api_key
-
-# OpenAI API - STT(음성인식) 및 TTS(음성합성)에 필요
+# OpenAI API - LLM, STT, TTS 모두 OpenAI 사용
 OPENAI_API_KEY=your_openai_api_key
 ```
 
 **API 키 발급 방법:**
-- Gemini API: [Google AI Studio](https://makersuite.google.com/app/apikey)
 - OpenAI API: [OpenAI Platform](https://platform.openai.com/api-keys)
+
+> **Note**: 모든 AI 서비스(LLM, STT, TTS)가 OpenAI API를 사용하므로 하나의 API 키만 필요합니다.
 
 ## 테스트 실행 및 검증 방법
 
-### 단위 테스트
+### 테스트 실행
 
 ```bash
 # Backend (RSpec) - 221개 테스트
 cd backend && bundle exec rspec
 
-# Frontend (Vitest) - 118개 테스트
+# Frontend Unit (Vitest) - 118개 테스트
 cd frontend && npm test
+
+# Frontend E2E (Playwright) - 13개 테스트 x 3 브라우저
+cd frontend && npm run test:e2e
 
 # 전체 테스트 (루트에서)
 npm test
 ```
+
+### 테스트 피라미드
+
+| 계층 | 프레임워크 | 테스트 수 | 설명 |
+|------|-----------|----------|------|
+| Unit | Vitest | 118 | 컴포넌트, 훅, 서비스 |
+| Integration | RSpec | 221 | API, 모델, 서비스 |
+| E2E | Playwright | 13 x 3 | 사용자 플로우 (Chrome, Firefox, Safari) |
 
 ### 테스트 커버리지 항목
 
