@@ -111,14 +111,19 @@ RSpec.describe RateLimiter, type: :controller do
       end
 
       it "has shorter minimum interval than audio" do
+        current_time = Time.current
+
+        # Manually set last request to 1.5 seconds ago (past the 1 second text interval)
+        store = controller.class.rate_limit_store
+        user = controller.send(:current_user)
+        store[user.id] = {
+          requests: [ current_time - 2.seconds ],
+          last_request: current_time - 1.5.seconds
+        }
+
+        allow(Time).to receive(:current).and_return(current_time)
         get :test_text
         expect(response).to have_http_status(:ok)
-
-        # Sleep for text interval (1 second) then retry
-        travel 1.5.seconds do
-          get :test_text
-          expect(response).to have_http_status(:ok)
-        end
       end
     end
 

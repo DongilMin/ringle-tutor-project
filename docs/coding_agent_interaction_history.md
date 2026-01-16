@@ -1309,3 +1309,170 @@ Lint:     No offenses detected
 
 ---
 
+## Phase 5.4 - 아키텍처 개선 (Single Source of Truth + SSE 검증)
+
+### [2026-01-16] 코드 리뷰 피드백 기반 아키텍처 리팩토링
+
+#### 개요
+코드 리뷰 과정에서 발견된 아키텍처 개선점을 바이브 코딩 방식으로 즉각 반영.
+리뷰어 피드백: "Single Source of Truth 위반 (가격 정보)", "Streaming 미적용 Latency 우려"
+
+#### 1. Single Source of Truth 적용 - 가격 정보 API 통합
+
+**문제 인식:**
+```
+프롬프트: "가격 정보가 Frontend(Purchase.tsx)와 Backend(Membership 모델) 양쪽에
+하드코딩되어 있어서 Single Source of Truth 위반이야. 정책 변경 시 두 군데 수정해야 하니까
+API로 상품 정보를 내려주는 방식으로 리팩토링해줘."
+```
+
+**해결 방식:**
+1. Backend에 Plans API 엔드포인트 생성 (`/api/v1/membership_plans`)
+2. Membership 모델의 상수를 Single Source of Truth로 지정
+3. Frontend에서 플랜 정보를 API에서 동적 로딩
+
+**생성/수정 파일:**
+```
+backend/app/controllers/api/v1/membership_plans_controller.rb  (신규)
+backend/spec/requests/api/v1/membership_plans_spec.rb         (신규)
+frontend/src/services/api.ts                                   (getPlans 추가)
+frontend/src/pages/Purchase.tsx                                (API 연동)
+frontend/src/__tests__/pages/Purchase.test.tsx                 (테스트 업데이트)
+```
+
+**핵심 코드:**
+
+**Backend - 플랜 정보 API:**
+```ruby
+# membership_plans_controller.rb
+class MembershipPlansController < BaseController
+  def index
+    plans = Membership::TYPES.map do |type|
+      {
+        type: type,
+        name: type.capitalize,
+        name_ko: plan_name_ko(type),
+        price: Membership::MEMBERSHIP_PRICES[type],
+        duration: Membership::MEMBERSHIP_DURATION_DAYS[type],
+        features: Membership::MEMBERSHIP_FEATURES[type],
+        popular: type == "premium"
+      }
+    end
+    render json: { plans: plans }
+  end
+end
+```
+
+**Frontend - API에서 플랜 로딩:**
+```typescript
+// api.ts
+export const getPlans = async (): Promise<PlanData[]> => {
+  const response = await api.get('/membership_plans');
+  return response.data.plans || [];
+};
+
+// Purchase.tsx
+useEffect(() => {
+  const fetchPlans = async () => {
+    const planData = await getPlans();
+    const displayPlans = planData
+      .filter((p) => p.type !== 'enterprise')  // 일반 유저용
+      .map(convertToDisplayPlan);
+    setPlans(displayPlans);
+  };
+  fetchPlans();
+}, []);
+```
+
+**아키텍처 개선:**
+```
+[Before - SSoT 위반]
+Frontend: plans = [{ type: 'basic', price: 9900 }, ...]  ← 하드코딩
+Backend:  MEMBERSHIP_PRICES = { basic: 9900, ... }       ← 하드코딩 (중복!)
+
+[After - SSoT 적용]
+Backend (SSoT):  MEMBERSHIP_PRICES = { basic: 9900, ... }
+       ↓ API
+Frontend (Consumer): const plans = await getPlans();     ← 동적 로딩
+```
+
+#### 2. SSE Streaming 검증 및 테스트 강화
+
+**문제 인식:**
+```
+프롬프트: "Streaming 미적용에 따른 Latency 문제가 있다고 하는데,
+실시간 대화 앱에서 응답 속도는 핵심 UX야. SSE 적용 상태 확인해줘."
+```
+
+**검증 결과:**
+SSE Streaming은 이미 Phase 4.4에서 구현 완료됨. 리뷰어가 놓친 부분.
+- Backend: `stream_message` 엔드포인트 (LLM 청크 실시간 전송)
+- Frontend: `useStreaming` 토글로 스트리밍 모드 활성화 (기본값: true)
+
+**테스트 추가:**
+```ruby
+# conversations_stream_spec.rb
+describe "POST /api/v1/conversations/:id/stream" do
+  it "returns SSE content type" do
+    post "/api/v1/conversations/#{conversation.id}/stream", ...
+    expect(response.content_type).to include("text/event-stream")
+  end
+
+  it "streams chunk events" do
+    allow_any_instance_of(LlmService).to receive(:chat_stream)
+      .and_yield("Hello").and_yield(" World")
+    post "/api/v1/conversations/#{conversation.id}/stream", ...
+    expect(response.body).to include("event: chunk")
+  end
+
+  it "streams complete event with audio" do
+    # TTS 오디오가 complete 이벤트에 포함되는지 검증
+    expect(response.body).to include("event: complete")
+    expect(response.body).to include("audio")
+  end
+end
+```
+
+#### 3. Rate Limiter 테스트 수정
+
+**발견된 이슈:**
+`travel` 헬퍼와 Rate Limiter 인메모리 저장소 간 타이밍 불일치
+
+**해결:**
+```ruby
+# Before - travel 헬퍼 사용 (불안정)
+travel 1.5.seconds do
+  get :test_text
+end
+
+# After - 직접 저장소 조작 (안정적)
+store[user.id] = {
+  requests: [current_time - 2.seconds],
+  last_request: current_time - 1.5.seconds
+}
+allow(Time).to receive(:current).and_return(current_time)
+get :test_text
+```
+
+#### 테스트 결과
+```
+Backend:  221 examples, 0 failures
+  - MembershipPlans API: 6 tests (신규)
+  - Streaming API: 6 tests (신규)
+  - Rate Limiter: 12 tests (수정)
+
+Frontend: 118 tests passed
+  - Purchase: 11 tests (API 모킹 추가)
+```
+
+#### 핵심 인사이트
+1. **코드 리뷰 피드백 즉시 반영**: 바이브 코딩으로 지적사항 → 수정 → 검증을 한 세션에서 완료
+2. **SSoT 원칙 준수**: 정책 데이터는 반드시 한 곳에서 관리, 나머지는 API로 조회
+3. **Streaming 기본값**: UX 핵심 기능은 기본 활성화, 토글로 비활성화 옵션 제공
+4. **테스트 안정성**: 시간 관련 테스트는 mock보다 직접 상태 설정이 안정적
+
+### Screenshot
+[docs/screenshots/05_architecture_improvement/]
+
+---
+

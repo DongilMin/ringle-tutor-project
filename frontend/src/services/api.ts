@@ -153,7 +153,23 @@ export const checkMembership = async (userId?: number) => {
   }
 };
 
-export type MembershipType = 'basic' | 'premium';
+export type MembershipType = 'basic' | 'premium' | 'enterprise';
+
+// Plan data from backend (Single Source of Truth)
+export interface PlanData {
+  type: MembershipType;
+  name: string;
+  name_ko: string;
+  price: number;
+  duration: number;
+  features: string[];
+  popular: boolean;
+}
+
+export const getPlans = async (): Promise<PlanData[]> => {
+  const response = await api.get('/membership_plans');
+  return response.data.plans || [];
+};
 
 export const purchaseMembership = async (
   membershipType: MembershipType = 'premium',

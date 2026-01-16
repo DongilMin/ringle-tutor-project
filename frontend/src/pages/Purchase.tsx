@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
-import { purchaseMembership } from '../services/api';
-import type { MembershipType } from '../services/api';
+import { purchaseMembership, getPlans } from '../services/api';
+import type { MembershipType, PlanData } from '../services/api';
 import {
   Check,
   CreditCard,
@@ -14,9 +14,10 @@ import {
   Lock,
   AlertCircle,
   CheckCircle,
+  Loader2,
 } from 'lucide-react';
 
-interface PlanOption {
+interface PlanDisplay {
   type: MembershipType;
   name: string;
   nameKo: string;
@@ -30,35 +31,31 @@ interface PlanOption {
   popular?: boolean;
 }
 
-const plans: PlanOption[] = [
-  {
-    type: 'basic',
-    name: 'Basic',
-    nameKo: '베이직',
-    price: 9900,
-    duration: 30,
-    features: [
-      { icon: <BookOpen className="h-5 w-5" />, label: '학습 기능', included: true },
-      { icon: <MessageCircle className="h-5 w-5" />, label: 'AI 대화', included: false },
-      { icon: <BarChart3 className="h-5 w-5" />, label: '레벨 분석', included: false },
-    ],
-  },
-  {
-    type: 'premium',
-    name: 'Premium',
-    nameKo: '프리미엄',
-    price: 19900,
-    duration: 60,
-    popular: true,
-    features: [
-      { icon: <BookOpen className="h-5 w-5" />, label: '학습 기능', included: true },
-      { icon: <MessageCircle className="h-5 w-5" />, label: 'AI 대화', included: true },
-      { icon: <BarChart3 className="h-5 w-5" />, label: '레벨 분석', included: true },
-    ],
-  },
-];
+// Feature display configuration
+const FEATURE_CONFIG: Record<string, { icon: React.ReactNode; label: string }> = {
+  learning: { icon: <BookOpen className="h-5 w-5" />, label: '학습 기능' },
+  conversation: { icon: <MessageCircle className="h-5 w-5" />, label: 'AI 대화' },
+  analysis: { icon: <BarChart3 className="h-5 w-5" />, label: '레벨 분석' },
+};
 
-type PaymentStep = 'select' | 'payment' | 'processing' | 'success' | 'error';
+const ALL_FEATURES = ['learning', 'conversation', 'analysis'];
+
+// Convert API plan data to display format
+const convertToDisplayPlan = (plan: PlanData): PlanDisplay => ({
+  type: plan.type,
+  name: plan.name,
+  nameKo: plan.name_ko,
+  price: plan.price,
+  duration: plan.duration,
+  popular: plan.popular,
+  features: ALL_FEATURES.map((feature) => ({
+    icon: FEATURE_CONFIG[feature]?.icon || <BookOpen className="h-5 w-5" />,
+    label: FEATURE_CONFIG[feature]?.label || feature,
+    included: plan.features.includes(feature),
+  })),
+});
+
+type PaymentStep = 'loading' | 'select' | 'payment' | 'processing' | 'success' | 'error';
 
 interface CardInfo {
   number: string;
@@ -91,8 +88,9 @@ const formatExpiry = (value: string) => {
 export default function Purchase() {
   const navigate = useNavigate();
   const { currentUser, refreshMembership } = useUser();
+  const [plans, setPlans] = useState<PlanDisplay[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<MembershipType>('premium');
-  const [step, setStep] = useState<PaymentStep>('select');
+  const [step, setStep] = useState<PaymentStep>('loading');
   const [cardInfo, setCardInfo] = useState<CardInfo>({
     number: '',
     expiry: '',
@@ -101,6 +99,27 @@ export default function Purchase() {
   });
   const [errors, setErrors] = useState<Partial<CardInfo>>({});
   const [errorMessage, setErrorMessage] = useState('');
+
+  // Fetch plans from API (Single Source of Truth)
+  useEffect(() => {
+    const fetchPlans = async () => {
+      try {
+        const planData = await getPlans();
+        // Filter out enterprise for regular users, only show basic and premium
+        const displayPlans = planData
+          .filter((p) => p.type !== 'enterprise')
+          .map(convertToDisplayPlan);
+        setPlans(displayPlans);
+        setStep('select');
+      } catch (error) {
+        console.error('Failed to fetch plans:', error);
+        setErrorMessage('플랜 정보를 불러오는데 실패했습니다.');
+        setStep('error');
+      }
+    };
+
+    fetchPlans();
+  }, []);
 
   useEffect(() => {
     if (!currentUser) {
@@ -191,6 +210,18 @@ export default function Purchase() {
 
   const selectedPlanData = plans.find((p) => p.type === selectedPlan);
 
+  // Loading State
+  if (step === 'loading') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-indigo-600" />
+          <p className="text-gray-600">플랜 정보를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Processing State
   if (step === 'processing') {
     return (
@@ -228,16 +259,19 @@ export default function Purchase() {
 
   // Error State
   if (step === 'error') {
+    const isLoadError = plans.length === 0;
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-red-100">
             <AlertCircle className="h-10 w-10 text-red-600" />
           </div>
-          <h2 className="mb-2 text-xl font-bold text-gray-900">결제 실패</h2>
+          <h2 className="mb-2 text-xl font-bold text-gray-900">
+            {isLoadError ? '로딩 실패' : '결제 실패'}
+          </h2>
           <p className="text-gray-600">{errorMessage}</p>
           <button
-            onClick={() => setStep('payment')}
+            onClick={() => (isLoadError ? window.location.reload() : setStep('payment'))}
             className="mt-6 rounded-lg bg-indigo-600 px-6 py-3 font-semibold text-white hover:bg-indigo-700"
           >
             다시 시도

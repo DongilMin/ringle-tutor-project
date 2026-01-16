@@ -169,10 +169,47 @@ VITE_API_URL=http://localhost:3000/api/v1
 
 ---
 
-## 10. 향후 개선 사항
+## 10. Rate Limiting (오남용 방지)
+
+### 요청 제한 설정
+| 타입 | 분당 | 시간당 | 일일 | 최소 간격 |
+|------|------|--------|------|-----------|
+| audio | 10회 | 60회 | 200회 | 2초 |
+| text | 20회 | 120회 | 500회 | 1초 |
+| default | 30회 | 200회 | 1000회 | 0.5초 |
+
+### 응답 헤더
+```
+X-RateLimit-Remaining-Minute: 9
+X-RateLimit-Remaining-Hour: 59
+X-RateLimit-Remaining-Day: 199
+Retry-After: 2 (rate limit 초과 시)
+```
+
+### Rate Limit 에러 응답
+```json
+{
+  "success": false,
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "요청이 너무 많습니다. 2초 후 다시 시도해주세요.",
+    "limit_type": "too_fast",
+    "retry_after": 2
+  }
+}
+```
+
+### 구현 방식
+- 인메모리 저장소 사용 (개발/데모용)
+- 프로덕션에서는 Redis로 전환 권장
+
+---
+
+## 11. 향후 개선 사항
 
 1. **인증**: JWT 기반 인증 구현
 2. **결제**: 실제 PG사 연동 (포트원, 토스페이먼츠 등)
 3. **대화 분석**: 학습 진도 및 실력 분석 기능
 4. **관리자**: 어드민 권한 체계 구현
 5. **알림**: 멤버십 만료 알림 (이메일, 푸시)
+6. **Rate Limiting**: Redis 기반 분산 환경 지원

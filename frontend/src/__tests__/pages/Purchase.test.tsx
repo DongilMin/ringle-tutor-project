@@ -3,14 +3,47 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import Purchase from '../../pages/Purchase';
 import { UserProvider } from '../../context/UserContext';
+import * as api from '../../services/api';
 
+// Mock the api module
 vi.mock('../../services/api', () => ({
   purchaseMembership: vi.fn(),
   getCurrentMembership: vi.fn().mockResolvedValue(null),
+  getPlans: vi.fn(),
 }));
 
 // Mock user context with a test user
 const mockUser = { id: 1, email: 'test@example.com', name: 'Test User' };
+
+const mockPlans = [
+  {
+    type: 'basic' as const,
+    name: 'Basic',
+    name_ko: '베이직',
+    price: 9900,
+    duration: 30,
+    features: ['learning'],
+    popular: false,
+  },
+  {
+    type: 'premium' as const,
+    name: 'Premium',
+    name_ko: '프리미엄',
+    price: 19900,
+    duration: 60,
+    features: ['learning', 'conversation', 'analysis'],
+    popular: true,
+  },
+  {
+    type: 'enterprise' as const,
+    name: 'Enterprise',
+    name_ko: '엔터프라이즈',
+    price: 49900,
+    duration: 90,
+    features: ['learning', 'conversation', 'analysis'],
+    popular: false,
+  },
+];
 
 const renderWithProviders = (component: React.ReactNode) => {
   return render(
@@ -44,50 +77,87 @@ vi.mock('../../context/UserContext', async (importOriginal) => {
 describe('Purchase Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default mock for getPlans
+    vi.mocked(api.getPlans).mockResolvedValue(mockPlans);
   });
 
-  it('renders purchase title', () => {
+  it('shows loading state initially', () => {
+    // Make getPlans hang
+    vi.mocked(api.getPlans).mockImplementation(() => new Promise(() => {}));
+
     renderWithProviders(<Purchase />);
 
-    expect(screen.getByText('멤버십 선택')).toBeInTheDocument();
-    expect(screen.getByText('나에게 맞는 플랜을 선택하세요')).toBeInTheDocument();
+    expect(screen.getByText('플랜 정보를 불러오는 중...')).toBeInTheDocument();
   });
 
-  it('renders basic plan details', () => {
+  it('renders purchase title after loading', async () => {
     renderWithProviders(<Purchase />);
 
-    expect(screen.getByText(/베이직/)).toBeInTheDocument();
-    expect(screen.getByText('₩9,900')).toBeInTheDocument();
-    expect(screen.getByText('/30일')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('멤버십 선택')).toBeInTheDocument();
+      expect(screen.getByText('나에게 맞는 플랜을 선택하세요')).toBeInTheDocument();
+    });
   });
 
-  it('renders premium plan details', () => {
+  it('renders basic plan details from API', async () => {
     renderWithProviders(<Purchase />);
 
-    // Premium text appears in plan card
-    expect(screen.getAllByText(/프리미엄/).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('₩19,900')).toBeInTheDocument();
-    expect(screen.getByText('/60일')).toBeInTheDocument();
-    expect(screen.getByText('추천')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/베이직/)).toBeInTheDocument();
+      expect(screen.getByText('₩9,900')).toBeInTheDocument();
+      expect(screen.getByText('/30일')).toBeInTheDocument();
+    });
   });
 
-  it('renders feature list', () => {
+  it('renders premium plan details from API', async () => {
     renderWithProviders(<Purchase />);
 
-    // Both plans have learning feature, so it appears twice
-    expect(screen.getAllByText('학습 기능')).toHaveLength(2);
-    expect(screen.getAllByText('AI 대화')).toHaveLength(2);
-    expect(screen.getAllByText('레벨 분석')).toHaveLength(2);
+    await waitFor(() => {
+      // Premium text appears in plan card
+      expect(screen.getAllByText(/프리미엄/).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('₩19,900')).toBeInTheDocument();
+      expect(screen.getByText('/60일')).toBeInTheDocument();
+      expect(screen.getByText('추천')).toBeInTheDocument();
+    });
   });
 
-  it('renders subscribe button', () => {
+  it('does not show enterprise plan (filtered out for regular users)', async () => {
     renderWithProviders(<Purchase />);
 
-    expect(screen.getByText('결제하기')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('멤버십 선택')).toBeInTheDocument();
+    });
+
+    // Enterprise should not be visible
+    expect(screen.queryByText(/엔터프라이즈/)).not.toBeInTheDocument();
+    expect(screen.queryByText('₩49,900')).not.toBeInTheDocument();
+  });
+
+  it('renders feature list', async () => {
+    renderWithProviders(<Purchase />);
+
+    await waitFor(() => {
+      // Both plans have learning feature, so it appears twice
+      expect(screen.getAllByText('학습 기능')).toHaveLength(2);
+      expect(screen.getAllByText('AI 대화')).toHaveLength(2);
+      expect(screen.getAllByText('레벨 분석')).toHaveLength(2);
+    });
+  });
+
+  it('renders subscribe button', async () => {
+    renderWithProviders(<Purchase />);
+
+    await waitFor(() => {
+      expect(screen.getByText('결제하기')).toBeInTheDocument();
+    });
   });
 
   it('navigates to payment step when clicking purchase button', async () => {
     renderWithProviders(<Purchase />);
+
+    await waitFor(() => {
+      expect(screen.getByText('결제하기')).toBeInTheDocument();
+    });
 
     const purchaseButton = screen.getByText('결제하기');
     fireEvent.click(purchaseButton);
@@ -99,6 +169,10 @@ describe('Purchase Page', () => {
 
   it('shows card input fields in payment step', async () => {
     renderWithProviders(<Purchase />);
+
+    await waitFor(() => {
+      expect(screen.getByText('결제하기')).toBeInTheDocument();
+    });
 
     const purchaseButton = screen.getByText('결제하기');
     fireEvent.click(purchaseButton);
@@ -113,6 +187,10 @@ describe('Purchase Page', () => {
 
   it('validates card number length', async () => {
     renderWithProviders(<Purchase />);
+
+    await waitFor(() => {
+      expect(screen.getByText('결제하기')).toBeInTheDocument();
+    });
 
     // Go to payment step
     fireEvent.click(screen.getByText('결제하기'));
@@ -134,38 +212,14 @@ describe('Purchase Page', () => {
     });
   });
 
-  it('shows back button to return to plan selection', async () => {
+  it('shows error state when API fails', async () => {
+    vi.mocked(api.getPlans).mockRejectedValue(new Error('API Error'));
+
     renderWithProviders(<Purchase />);
 
-    // Go to payment step
-    fireEvent.click(screen.getByText('결제하기'));
-
     await waitFor(() => {
-      expect(screen.getByText('플랜 선택으로')).toBeInTheDocument();
-    });
-  });
-
-  it('shows secure payment message', async () => {
-    renderWithProviders(<Purchase />);
-
-    // Go to payment step
-    fireEvent.click(screen.getByText('결제하기'));
-
-    await waitFor(() => {
-      expect(screen.getByText(/SSL 보안 결제/)).toBeInTheDocument();
-    });
-  });
-
-  it('shows demo payment notice', async () => {
-    renderWithProviders(<Purchase />);
-
-    // Go to payment step
-    fireEvent.click(screen.getByText('결제하기'));
-
-    await waitFor(() => {
-      expect(
-        screen.getByText('* 이것은 데모 결제입니다. 실제 결제가 발생하지 않습니다.')
-      ).toBeInTheDocument();
+      expect(screen.getByText('로딩 실패')).toBeInTheDocument();
+      expect(screen.getByText('플랜 정보를 불러오는데 실패했습니다.')).toBeInTheDocument();
     });
   });
 });

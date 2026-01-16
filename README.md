@@ -147,10 +147,10 @@ OPENAI_API_KEY=your_openai_api_key
 ### 단위 테스트
 
 ```bash
-# Backend (RSpec) - 197개 테스트
+# Backend (RSpec) - 221개 테스트
 cd backend && bundle exec rspec
 
-# Frontend (Vitest) - 75개+ 테스트
+# Frontend (Vitest) - 118개 테스트
 cd frontend && npm test
 
 # 전체 테스트 (루트에서)
