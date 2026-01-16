@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import Home from '../../pages/Home';
 import { UserProvider } from '../../context/UserContext';
@@ -14,9 +14,19 @@ vi.mock('react-router-dom', async (importOriginal) => {
   };
 });
 
+// Mock API
+vi.mock('../../services/api', () => ({
+  getDemoUsers: vi.fn().mockResolvedValue([
+    { id: 1, email: 'user1@example.com', name: '김철수' },
+    { id: 2, email: 'user2@example.com', name: '이영희' },
+    { id: 3, email: 'user3@example.com', name: '박민수' },
+  ]),
+}));
+
 // Mock UserContext
 const mockSetCurrentUser = vi.fn();
 const mockSetIsAdmin = vi.fn();
+const mockLogout = vi.fn();
 
 vi.mock('../../context/UserContext', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../context/UserContext')>();
@@ -32,7 +42,7 @@ vi.mock('../../context/UserContext', async (importOriginal) => {
       setMembership: vi.fn(),
       refreshMembership: vi.fn().mockResolvedValue(undefined),
       hasFeature: vi.fn().mockReturnValue(false),
-      logout: vi.fn(),
+      logout: mockLogout,
     }),
     UserProvider: actual.UserProvider,
   };
@@ -77,18 +87,24 @@ describe('Home Page', () => {
     expect(screen.getByText('멤버십 관리 및 유저 관리')).toBeInTheDocument();
   });
 
-  it('renders user selection dropdown', () => {
+  it('renders user selection dropdown', async () => {
     renderWithProviders(<Home />);
 
     expect(screen.getByText('유저 선택')).toBeInTheDocument();
-    expect(screen.getByRole('combobox')).toBeInTheDocument();
+
+    // Wait for users to load
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
+    });
   });
 
-  it('shows demo users in dropdown', () => {
+  it('shows demo users in dropdown', async () => {
     renderWithProviders(<Home />);
 
-    const dropdown = screen.getByRole('combobox');
-    expect(dropdown).toBeInTheDocument();
+    // Wait for users to load
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
+    });
 
     // Check for demo user options
     expect(screen.getByText(/김철수/)).toBeInTheDocument();
@@ -116,8 +132,13 @@ describe('Home Page', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/admin');
   });
 
-  it('calls setCurrentUser and navigates to dashboard when user login clicked', () => {
+  it('calls setCurrentUser and navigates to dashboard when user login clicked', async () => {
     renderWithProviders(<Home />);
+
+    // Wait for users to load
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
+    });
 
     const userButton = screen.getByText('유저로 로그인');
     fireEvent.click(userButton);

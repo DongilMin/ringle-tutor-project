@@ -5,13 +5,15 @@ module Api
         def index
           memberships = Membership.includes(:user).order(created_at: :desc)
 
-          render_collection(memberships, serializer: MembershipSerializer)
+          # Include user data for admin view
+          data = memberships.map { |m| MembershipSerializer.new(m).as_json_with_user }
+          render_success(data: data)
         end
 
         def show
-          membership = Membership.find(params[:id])
+          membership = Membership.includes(:user).find(params[:id])
 
-          render_resource(membership, serializer: MembershipSerializer)
+          render_success(data: MembershipSerializer.new(membership).as_json_with_user)
         end
 
         def create
@@ -36,7 +38,7 @@ module Api
           membership.features ||= Membership::MEMBERSHIP_FEATURES[membership.membership_type]
 
           if membership.save
-            render_resource(membership, serializer: MembershipSerializer, status: :created)
+            render_success(data: MembershipSerializer.new(membership).as_json_with_user, status: :created)
           else
             render_error(
               message: "Failed to create membership",

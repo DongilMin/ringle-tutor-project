@@ -8,6 +8,9 @@ Rails.application.routes.draw do
       # Membership plans (public)
       resources :membership_plans, only: [ :index ]
 
+      # Users list (public, for demo user selection)
+      resources :users, only: [ :index ]
+
       # User memberships
       resources :memberships, only: [ :index, :show ] do
         collection do

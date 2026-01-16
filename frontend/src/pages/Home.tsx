@@ -1,35 +1,39 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser, type User } from '../context/UserContext';
-import { Users, Shield, LogIn } from 'lucide-react';
-
-// 가상의 유저 데이터 (실제로는 API에서 가져옴)
-const DEMO_USERS: User[] = [
-  { id: 1, email: 'user1@example.com', name: '김철수' },
-  { id: 2, email: 'user2@example.com', name: '이영희' },
-  { id: 3, email: 'user3@example.com', name: '박민수' },
-  { id: 4, email: 'user4@example.com', name: '정수진' },
-  { id: 5, email: 'user5@example.com', name: '최동훈' },
-];
+import { getDemoUsers } from '../services/api';
+import { Users, Shield, LogIn, Loader2 } from 'lucide-react';
 
 export default function Home() {
   const navigate = useNavigate();
-  const { setCurrentUser, setIsAdmin, currentUser, isAdmin } = useUser();
-  const [selectedUserId, setSelectedUserId] = useState<number>(1);
+  const { setCurrentUser, setIsAdmin, logout } = useUser();
+  const [users, setUsers] = useState<User[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // 이미 로그인된 상태면 대시보드로 리다이렉트
-  if (currentUser && !isAdmin) {
-    navigate('/dashboard');
-    return null;
-  }
+  // Home 페이지 진입 시 이전 로그인 상태 초기화 및 유저 목록 로드
+  useEffect(() => {
+    logout();
 
-  if (isAdmin) {
-    navigate('/admin');
-    return null;
-  }
+    const fetchUsers = async () => {
+      try {
+        const fetchedUsers = await getDemoUsers();
+        setUsers(fetchedUsers);
+        if (fetchedUsers.length > 0) {
+          setSelectedUserId(fetchedUsers[0].id);
+        }
+      } catch (error) {
+        console.error('Failed to fetch users:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUsers();
+  }, [logout]);
 
   const handleUserLogin = () => {
-    const user = DEMO_USERS.find((u) => u.id === selectedUserId);
+    const user = users.find((u) => u.id === selectedUserId);
     if (user) {
       setIsAdmin(false);
       setCurrentUser(user);
@@ -71,22 +75,30 @@ export default function Home() {
 
             <div className="mb-4">
               <label className="mb-2 block text-sm font-medium text-gray-700">유저 선택</label>
-              <select
-                value={selectedUserId}
-                onChange={(e) => setSelectedUserId(Number(e.target.value))}
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              >
-                {DEMO_USERS.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name} ({user.email})
-                  </option>
-                ))}
-              </select>
+              {loading ? (
+                <div className="flex items-center justify-center py-3">
+                  <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
+                  <span className="ml-2 text-sm text-gray-500">유저 목록 로딩 중...</span>
+                </div>
+              ) : (
+                <select
+                  value={selectedUserId ?? ''}
+                  onChange={(e) => setSelectedUserId(Number(e.target.value))}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                >
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name} ({user.email})
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <button
               onClick={handleUserLogin}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white transition hover:bg-indigo-700"
+              disabled={loading || !selectedUserId}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <LogIn className="h-5 w-5" />
               유저로 로그인

@@ -239,7 +239,7 @@ export default function Admin() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-gray-900">
-                          {membership.user?.email || `User #${membership.user_id}`}
+                          {membership.user?.name || `User #${membership.user_id || membership.id}`}
                         </span>
                         <span
                           className={`${membershipLabels[membership.membership_type]?.color || 'bg-gray-500'} rounded-full px-2 py-0.5 text-xs text-white`}
@@ -250,7 +250,13 @@ export default function Admin() {
                         {getStatusBadge(membership.status)}
                       </div>
                       <p className="text-sm text-gray-500">
-                        {membership.start_date} ~ {membership.end_date}
+                        {membership.user?.email && (
+                          <span className="mr-2">{membership.user.email}</span>
+                        )}
+                        <span className="text-gray-400">|</span>
+                        <span className="ml-2">
+                          {membership.start_date} ~ {membership.end_date}
+                        </span>
                       </p>
                     </div>
                   </div>
