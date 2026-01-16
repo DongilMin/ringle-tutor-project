@@ -66,6 +66,28 @@ class LlmService
     }
   end
 
+  # Streaming chat - yields chunks to the block
+  def chat_stream(user_message, context: [], &block)
+    validate_message!(user_message)
+
+    @conversation_history = context if context.present?
+    @conversation_history << { role: "user", content: user_message }
+
+    full_response = ""
+
+    call_openai_api_stream do |chunk|
+      full_response += chunk
+      block.call(chunk) if block
+    end
+
+    @conversation_history << { role: "assistant", content: full_response }
+
+    {
+      message: full_response,
+      conversation_history: @conversation_history
+    }
+  end
+
   def clear_history
     @conversation_history = []
   end
@@ -99,13 +121,54 @@ class LlmService
     JSON.parse(response.body)
   end
 
-  def build_request_body
-    {
+  def call_openai_api_stream(&block)
+    uri = URI.parse("https://api.openai.com/v1/chat/completions")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+    http.cert_store = OpenSSL::X509::Store.new
+    http.cert_store.set_default_paths
+    http.open_timeout = DEFAULT_TIMEOUT
+    http.read_timeout = DEFAULT_TIMEOUT
+
+    request = Net::HTTP::Post.new(uri.path)
+    request["Authorization"] = "Bearer #{@api_key}"
+    request["Content-Type"] = "application/json"
+    request.body = build_request_body(stream: true).to_json
+
+    http.request(request) do |response|
+      handle_response_errors(response)
+
+      buffer = ""
+      response.read_body do |chunk|
+        buffer += chunk
+        while (line_end = buffer.index("\n"))
+          line = buffer.slice!(0..line_end).strip
+          next if line.empty?
+          next unless line.start_with?("data: ")
+
+          data = line[6..]
+          next if data == "[DONE]"
+
+          parsed = JSON.parse(data) rescue nil
+          next unless parsed
+
+          content = parsed.dig("choices", 0, "delta", "content")
+          block.call(content) if content && block
+        end
+      end
+    end
+  end
+
+  def build_request_body(stream: false)
+    body = {
       model: @model,
       messages: build_messages,
       max_tokens: MAX_TOKENS,
       temperature: 0.7
     }
+    body[:stream] = true if stream
+    body
   end
 
   def build_messages

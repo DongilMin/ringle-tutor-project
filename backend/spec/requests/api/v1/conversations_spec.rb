@@ -375,6 +375,105 @@ RSpec.describe 'Api::V1::Conversations', type: :request do
     end
   end
 
+  describe 'Conversation Stream' do
+    let!(:user) { create(:user) }
+    let!(:membership) { create(:membership, :active, user: user) }
+    let!(:conversation) { create(:conversation, user: user) }
+
+    let(:mock_llm_service) { instance_double(LlmService) }
+    let(:mock_tts_service) { instance_double(TtsService) }
+
+    before do
+      allow(LlmService).to receive(:new).and_return(mock_llm_service)
+      allow(TtsService).to receive(:new).and_return(mock_tts_service)
+
+      allow(mock_llm_service).to receive(:chat_stream) do |_msg, context:, &block|
+        # Simulate streaming chunks
+        block.call("Hello") if block
+        block.call(" there!") if block
+        { message: "Hello there!", conversation_history: [] }
+      end
+
+      allow(mock_tts_service).to receive(:synthesize).and_return({
+        audio_data: "fake_audio_bytes",
+        content_type: "audio/mpeg",
+        duration: 2.0
+      })
+    end
+
+    describe 'POST /api/v1/conversations/:id/stream' do
+      it 'returns SSE content type' do
+        post "/api/v1/conversations/#{conversation.id}/stream",
+             params: { message: { content: 'Hello' } }
+
+        expect(response.content_type).to include('text/event-stream')
+      end
+
+      it 'creates user and assistant messages' do
+        expect {
+          post "/api/v1/conversations/#{conversation.id}/stream",
+               params: { message: { content: 'Hello' } }
+        }.to change(Message, :count).by(2)
+      end
+
+      it 'calls LLM service with chat_stream' do
+        post "/api/v1/conversations/#{conversation.id}/stream",
+             params: { message: { content: 'Hello' } }
+
+        expect(mock_llm_service).to have_received(:chat_stream)
+      end
+
+      it 'calls TTS service after streaming completes' do
+        post "/api/v1/conversations/#{conversation.id}/stream",
+             params: { message: { content: 'Hello' } }
+
+        expect(mock_tts_service).to have_received(:synthesize).with("Hello there!")
+      end
+
+      it 'includes SSE event data in response body' do
+        post "/api/v1/conversations/#{conversation.id}/stream",
+             params: { message: { content: 'Hello' } }
+
+        body = response.body
+        expect(body).to include('event: user_message')
+        expect(body).to include('event: chunk')
+        expect(body).to include('event: complete')
+      end
+
+      context 'when LLM service fails' do
+        before do
+          allow(mock_llm_service).to receive(:chat_stream)
+            .and_raise(LlmService::ApiError, "API unavailable")
+        end
+
+        it 'returns error event in stream' do
+          post "/api/v1/conversations/#{conversation.id}/stream",
+               params: { message: { content: 'Hello' } }
+
+          expect(response.body).to include('event: error')
+        end
+      end
+
+      context 'with conversation context' do
+        before do
+          # Create existing messages in conversation
+          conversation.messages.create!(role: 'user', content: 'Previous question')
+          conversation.messages.create!(role: 'assistant', content: 'Previous answer')
+        end
+
+        it 'passes conversation history to LLM' do
+          post "/api/v1/conversations/#{conversation.id}/stream",
+               params: { message: { content: 'Follow up' } }
+
+          expect(mock_llm_service).to have_received(:chat_stream) do |msg, context:|
+            expect(context).to be_an(Array)
+            expect(context.any? { |m| m[:content] == 'Previous question' }).to be true
+          end
+        end
+      end
+    end
+  end
+
   private
 
   def json_response

@@ -1,6 +1,17 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Mic, Send, Keyboard, AlertCircle, Volume2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  Mic,
+  Send,
+  Keyboard,
+  AlertCircle,
+  Volume2,
+  Zap,
+  Play,
+  Pause,
+  RotateCcw,
+} from 'lucide-react';
 import { useUser } from '../context/UserContext';
 import { useConversation } from '../context/ConversationContext';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
@@ -11,8 +22,10 @@ import {
   createConversation,
   sendAudioMessage,
   sendTextMessage,
+  sendTextMessageStream,
   checkMembership,
   withRetry,
+  RateLimitError,
   type AudioSendResponse,
 } from '../services/api';
 import clsx from 'clsx';
@@ -23,8 +36,18 @@ export default function Conversation() {
   const { messages, addMessage, setConversationState, conversationState, setSessionId, sessionId } =
     useConversation();
 
-  const { startRecording, stopRecording, mediaStream, audioBlob, resetRecording } =
-    useAudioRecorder();
+  const {
+    startRecording,
+    stopRecording,
+    mediaStream,
+    audioBlob,
+    resetRecording,
+    audioLevel,
+    isVADActive,
+    duration,
+    vadConfig,
+    state: recordingState,
+  } = useAudioRecorder();
 
   const { requestPermission } = useAudioPermission();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -35,7 +58,13 @@ export default function Conversation() {
   const [remainingConversations, setRemainingConversations] = useState<number | null>(null);
   const [toastError, setToastError] = useState<string | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<(() => Promise<void>) | null>(null);
+  const [streamingText, setStreamingText] = useState<string>('');
+  const [useStreaming, setUseStreaming] = useState(true);
+  const [previewAudioUrl, setPreviewAudioUrl] = useState<string | null>(null);
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortStreamRef = useRef<(() => void) | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const initStartedRef = useRef(false);
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -152,61 +181,158 @@ export default function Conversation() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Handle Audio Blob (Send to Backend)
+  // Helper function to convert Blob to data URL
+  const blobToDataUrl = useCallback((blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }, []);
+
+  // Handle Audio Blob - Enter Preview Mode (instead of auto-sending)
   useEffect(() => {
-    const sendAudio = async () => {
+    const enterPreviewMode = async () => {
       if (audioBlob && sessionId) {
-        setIsProcessing(true);
-        setConversationState('processing');
-
-        const doSendAudio = async () => {
-          const response = await withRetry(() => sendAudioMessage(sessionId, audioBlob));
-          const { user_message, assistant_message, audio } = response as AudioSendResponse;
-
-          addMessage({ content: user_message.content, sender: 'user' });
-
-          const audioUrl = audio?.data
-            ? `data:${audio.content_type};base64,${audio.data}`
-            : undefined;
-          addMessage({ content: assistant_message.content, sender: 'ai', audioUrl });
-
-          if (audioUrl) {
-            playResponseAudio(audioUrl);
-          } else {
-            setConversationState('idle');
-          }
-        };
-
-        try {
-          await doSendAudio();
-        } catch (error) {
-          console.error('Failed to send audio', error);
-          const axiosError = error as {
-            response?: {
-              data?: { error?: { message?: string }; message?: string };
-              status?: number;
-            };
-            message?: string;
-          };
-          const errorMessage =
-            axiosError.response?.data?.error?.message ||
-            axiosError.response?.data?.message ||
-            axiosError.message ||
-            '네트워크 오류가 발생했습니다';
-          setToastError(`음성 처리 실패: ${errorMessage}`);
-          setLastFailedAction(() => doSendAudio);
-          setConversationState('idle');
-        } finally {
-          setIsProcessing(false);
-          resetRecording();
-        }
+        // Convert to data URL for preview playback
+        const audioUrl = await blobToDataUrl(audioBlob);
+        setPreviewAudioUrl(audioUrl);
+        setPreviewBlob(audioBlob);
+        setConversationState('preview');
+        resetRecording();
       }
     };
 
     if (audioBlob) {
-      sendAudio();
+      enterPreviewMode();
     }
-  }, [audioBlob, sessionId, addMessage, setConversationState, resetRecording, playResponseAudio]);
+  }, [audioBlob, sessionId, blobToDataUrl, setConversationState, resetRecording]);
+
+  // Handle Preview Playback (stays in preview mode after playback)
+  const handlePreviewPlay = useCallback(() => {
+    if (!previewAudioUrl) return;
+
+    // If already playing, stop it
+    if (isPreviewPlaying && audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
+      setIsPreviewPlaying(false);
+      return;
+    }
+
+    // Stop any current playback
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
+    }
+
+    const audio = new Audio(previewAudioUrl);
+    audioPlayerRef.current = audio;
+    setIsPreviewPlaying(true);
+
+    // Return to preview state after playback (not idle)
+    audio.onended = () => {
+      setIsPreviewPlaying(false);
+    };
+
+    audio.play().catch((e) => {
+      console.error('Preview playback failed', e);
+      setIsPreviewPlaying(false);
+    });
+  }, [previewAudioUrl, isPreviewPlaying]);
+
+  // Handle Cancel Preview
+  const handleCancelPreview = useCallback(() => {
+    // Stop any playing audio
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
+    }
+    setIsPreviewPlaying(false);
+    setPreviewAudioUrl(null);
+    setPreviewBlob(null);
+    setConversationState('idle');
+  }, [setConversationState]);
+
+  // Handle Confirm Send (after preview)
+  const handleConfirmSend = useCallback(async () => {
+    if (!previewBlob || !sessionId || !previewAudioUrl) return;
+
+    // Stop any playing audio
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
+    }
+    setIsPreviewPlaying(false);
+
+    setIsProcessing(true);
+    setConversationState('processing');
+
+    const userAudioUrl = previewAudioUrl;
+    const blobToSend = previewBlob;
+
+    // Clear preview state
+    setPreviewAudioUrl(null);
+    setPreviewBlob(null);
+
+    const doSendAudio = async () => {
+      const response = await withRetry(() => sendAudioMessage(sessionId, blobToSend));
+      const { user_message, assistant_message, audio } = response as AudioSendResponse;
+
+      // Include user's audio URL for playback
+      addMessage({ content: user_message.content, sender: 'user', audioUrl: userAudioUrl });
+
+      const audioUrl = audio?.data ? `data:${audio.content_type};base64,${audio.data}` : undefined;
+      addMessage({ content: assistant_message.content, sender: 'ai', audioUrl });
+
+      if (audioUrl) {
+        playResponseAudio(audioUrl);
+      } else {
+        setConversationState('idle');
+      }
+    };
+
+    try {
+      await doSendAudio();
+    } catch (error) {
+      console.error('Failed to send audio', error);
+
+      // Special handling for rate limit errors
+      if (error instanceof RateLimitError) {
+        const waitTime = error.retryAfter ? `${error.retryAfter}초 후에` : '잠시 후';
+        setToastError(`요청이 너무 많습니다. ${waitTime} 다시 시도해주세요.`);
+        setLastFailedAction(null);
+        setConversationState('idle');
+        return;
+      }
+
+      const axiosError = error as {
+        response?: {
+          data?: { error?: { message?: string }; message?: string };
+          status?: number;
+        };
+        message?: string;
+      };
+      const errorMessage =
+        axiosError.response?.data?.error?.message ||
+        axiosError.response?.data?.message ||
+        axiosError.message ||
+        '네트워크 오류가 발생했습니다';
+      setToastError(`음성 처리 실패: ${errorMessage}`);
+      setLastFailedAction(() => doSendAudio);
+      setConversationState('idle');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [
+    previewBlob,
+    sessionId,
+    previewAudioUrl,
+    addMessage,
+    setConversationState,
+    playResponseAudio,
+  ]);
 
   // Loading state while checking membership
   if (membershipChecking) {
@@ -278,32 +404,79 @@ export default function Conversation() {
     // Add user message immediately
     addMessage({ content: userText, sender: 'user' });
 
-    const doSendText = async () => {
-      const response = await withRetry(() => sendTextMessage(sessionId, userText));
-      const { assistant_message, audio } = response as AudioSendResponse;
+    if (useStreaming) {
+      // Use streaming API
+      setStreamingText('');
 
-      const audioUrl = audio?.data ? `data:${audio.content_type};base64,${audio.data}` : undefined;
-      addMessage({ content: assistant_message.content, sender: 'ai', audioUrl });
+      abortStreamRef.current = sendTextMessageStream(sessionId, userText, {
+        onChunk: (chunk) => {
+          setStreamingText((prev) => prev + chunk);
+        },
+        onComplete: (data) => {
+          setStreamingText('');
+          const audioUrl = data.audio?.data
+            ? `data:${data.audio.content_type};base64,${data.audio.data}`
+            : undefined;
+          addMessage({ content: data.assistant_message.content, sender: 'ai', audioUrl });
 
-      if (audioUrl) {
-        playResponseAudio(audioUrl);
-      } else {
+          if (audioUrl) {
+            playResponseAudio(audioUrl);
+          } else {
+            setConversationState('idle');
+          }
+          setIsProcessing(false);
+          abortStreamRef.current = null;
+        },
+        onError: (error) => {
+          setStreamingText('');
+          setToastError(`스트리밍 오류: ${error}`);
+          setConversationState('idle');
+          setIsProcessing(false);
+          abortStreamRef.current = null;
+        },
+      });
+    } else {
+      // Use non-streaming API
+      const doSendText = async () => {
+        const response = await withRetry(() => sendTextMessage(sessionId, userText));
+        const { assistant_message, audio } = response as AudioSendResponse;
+
+        const audioUrl = audio?.data
+          ? `data:${audio.content_type};base64,${audio.data}`
+          : undefined;
+        addMessage({ content: assistant_message.content, sender: 'ai', audioUrl });
+
+        if (audioUrl) {
+          playResponseAudio(audioUrl);
+        } else {
+          setConversationState('idle');
+        }
+      };
+
+      try {
+        await doSendText();
+      } catch (error) {
+        console.error('Failed to send text', error);
+
+        // Special handling for rate limit errors
+        if (error instanceof RateLimitError) {
+          const waitTime = error.retryAfter ? `${error.retryAfter}초 후에` : '잠시 후';
+          setToastError(`요청이 너무 많습니다. ${waitTime} 다시 시도해주세요.`);
+          setLastFailedAction(null); // Don't offer retry for rate limits
+          setConversationState('idle');
+          setIsProcessing(false);
+          return;
+        }
+
+        const axiosError = error as { response?: { data?: { error?: { message?: string } } } };
+        const errorMessage =
+          axiosError.response?.data?.error?.message || '네트워크 오류가 발생했습니다';
+        setToastError(`텍스트 처리 실패: ${errorMessage}`);
+        setLastFailedAction(() => doSendText);
         setConversationState('idle');
+      } finally {
+        setIsProcessing(false);
       }
-    };
-
-    try {
-      await doSendText();
-    } catch (error) {
-      console.error('Failed to send text', error);
-      const axiosError = error as { response?: { data?: { error?: { message?: string } } } };
-      const errorMessage =
-        axiosError.response?.data?.error?.message || '네트워크 오류가 발생했습니다';
-      setToastError(`텍스트 처리 실패: ${errorMessage}`);
-      setLastFailedAction(() => doSendText);
-      setConversationState('idle');
-    } finally {
-      setIsProcessing(false);
     }
   };
 
@@ -354,11 +527,25 @@ export default function Conversation() {
             </button>
             <h1 className="text-xl font-bold text-gray-800">Conversation Practice</h1>
           </div>
-          {remainingConversations !== null && (
-            <div className="rounded-full bg-indigo-100 px-3 py-1 text-sm font-medium text-indigo-700">
-              남은 대화: {remainingConversations}회
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {/* Streaming toggle */}
+            <button
+              onClick={() => setUseStreaming(!useStreaming)}
+              className={clsx(
+                'flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-colors',
+                useStreaming ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+              )}
+              title={useStreaming ? '스트리밍 모드 켜짐' : '스트리밍 모드 꺼짐'}
+            >
+              <Zap className="h-3 w-3" />
+              {useStreaming ? 'Stream' : 'Off'}
+            </button>
+            {remainingConversations !== null && (
+              <div className="rounded-full bg-indigo-100 px-3 py-1 text-sm font-medium text-indigo-700">
+                남은 대화: {remainingConversations}회
+              </div>
+            )}
+          </div>
         </header>
 
         {/* Chat Area */}
@@ -392,16 +579,36 @@ export default function Conversation() {
               >
                 <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
               </div>
+              {/* User message play button (right side) */}
+              {msg.sender === 'user' && msg.audioUrl && (
+                <button
+                  onClick={() => playResponseAudio(msg.audioUrl!)}
+                  disabled={conversationState === 'playing'}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-50"
+                  title="내 음성 다시 듣기"
+                >
+                  <Volume2 className="h-4 w-4" />
+                </button>
+              )}
             </div>
           ))}
           {isProcessing && (
             <div className="flex justify-start">
-              <div className="flex items-center space-x-2 rounded-2xl bg-gray-200 px-5 py-3 text-base text-gray-600">
-                <div className="h-3 w-3 animate-bounce rounded-full bg-gray-400"></div>
-                <div className="h-3 w-3 animate-bounce rounded-full bg-gray-400 [animation-delay:0.1s]"></div>
-                <div className="h-3 w-3 animate-bounce rounded-full bg-gray-400 [animation-delay:0.2s]"></div>
-                <span className="ml-2">AI is thinking...</span>
-              </div>
+              {streamingText ? (
+                /* Streaming response */
+                <div className="max-w-[80%] rounded-2xl rounded-bl-none border border-gray-100 bg-white px-5 py-3 text-base text-gray-800 shadow-sm">
+                  <p className="whitespace-pre-wrap leading-relaxed">{streamingText}</p>
+                  <span className="inline-block h-4 w-1 animate-pulse bg-indigo-500 ml-1"></span>
+                </div>
+              ) : (
+                /* Loading dots */
+                <div className="flex items-center space-x-2 rounded-2xl bg-gray-200 px-5 py-3 text-base text-gray-600">
+                  <div className="h-3 w-3 animate-bounce rounded-full bg-gray-400"></div>
+                  <div className="h-3 w-3 animate-bounce rounded-full bg-gray-400 [animation-delay:0.1s]"></div>
+                  <div className="h-3 w-3 animate-bounce rounded-full bg-gray-400 [animation-delay:0.2s]"></div>
+                  <span className="ml-2">AI is thinking...</span>
+                </div>
+              )}
             </div>
           )}
           <div ref={messagesEndRef} />
@@ -450,7 +657,7 @@ export default function Conversation() {
           ) : (
             /* Voice Input Mode */
             <div className="flex flex-col items-center space-y-4">
-              {/* Waveform */}
+              {/* Waveform / Preview / Status */}
               <div className="h-16 w-full overflow-hidden rounded-xl bg-gray-900 shadow-inner">
                 {conversationState === 'recording' ? (
                   <Waveform
@@ -461,6 +668,27 @@ export default function Conversation() {
                     color="#818cf8"
                     backgroundColor="#111827"
                   />
+                ) : conversationState === 'preview' ? (
+                  <div className="flex h-full w-full items-center justify-center gap-3 text-sm">
+                    {isPreviewPlaying ? (
+                      <>
+                        <Volume2 className="h-5 w-5 text-indigo-400 animate-pulse" />
+                        <span className="text-indigo-400">재생 중...</span>
+                        <div className="flex items-center gap-1">
+                          <div className="h-3 w-1 animate-[bounce_0.6s_ease-in-out_infinite] rounded-full bg-indigo-400" />
+                          <div className="h-4 w-1 animate-[bounce_0.6s_ease-in-out_0.1s_infinite] rounded-full bg-indigo-400" />
+                          <div className="h-2 w-1 animate-[bounce_0.6s_ease-in-out_0.2s_infinite] rounded-full bg-indigo-400" />
+                          <div className="h-5 w-1 animate-[bounce_0.6s_ease-in-out_0.3s_infinite] rounded-full bg-indigo-400" />
+                          <div className="h-3 w-1 animate-[bounce_0.6s_ease-in-out_0.4s_infinite] rounded-full bg-indigo-400" />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="h-5 w-5 text-green-400" />
+                        <span className="text-green-400">녹음 완료 - 미리 듣고 전송하세요</span>
+                      </>
+                    )}
+                  </div>
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-sm text-gray-500">
                     {conversationState === 'processing' ? 'Processing...' : 'Ready to record'}
@@ -468,7 +696,47 @@ export default function Conversation() {
                 )}
               </div>
 
-              {/* Voice Controls */}
+              {/* VAD Status & Audio Level (only during recording) */}
+              {recordingState === 'recording' && (
+                <div className="flex w-full flex-col gap-2 px-2">
+                  {/* Recording time indicator */}
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                    <span className="text-sm font-medium text-red-500">
+                      {duration}초 / {vadConfig.maxRecordingTime / 1000}초
+                    </span>
+                    {duration >= vadConfig.maxRecordingTime / 1000 - 10 && (
+                      <span className="text-xs text-orange-500">
+                        ({Math.max(0, vadConfig.maxRecordingTime / 1000 - duration)}초 남음)
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex w-full items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={clsx(
+                          'h-2 w-2 rounded-full',
+                          isVADActive ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'
+                        )}
+                      />
+                      <span className="text-xs text-gray-500">
+                        {isVADActive ? '자동 중지 활성화' : '말씀해 주세요...'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">음량</span>
+                      <div className="h-2 w-20 overflow-hidden rounded-full bg-gray-200">
+                        <div
+                          className="h-full bg-indigo-500 transition-all duration-100"
+                          style={{ width: `${audioLevel}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Voice Controls - Recording State */}
               {conversationState === 'recording' ? (
                 <div className="flex w-full items-center justify-center gap-4">
                   <button
@@ -478,16 +746,59 @@ export default function Conversation() {
                     }}
                     className="flex-1 rounded-xl border-2 border-gray-300 bg-white px-6 py-3 text-base font-semibold text-gray-700 transition hover:bg-gray-50"
                   >
-                    Cancel
+                    취소
                   </button>
                   <button
                     onClick={handleMicClick}
                     className="flex-1 rounded-xl bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-700"
                   >
-                    Send
+                    녹음 완료
+                  </button>
+                </div>
+              ) : conversationState === 'preview' ? (
+                /* Preview State - Listen, Send, or Re-record */
+                <div className="flex w-full items-center justify-center gap-3">
+                  <button
+                    onClick={handleCancelPreview}
+                    className="flex items-center gap-2 rounded-xl border-2 border-gray-300 bg-white px-4 py-3 text-base font-semibold text-gray-700 transition hover:bg-gray-50"
+                    title="다시 녹음"
+                  >
+                    <RotateCcw className="h-5 w-5" />
+                    다시 녹음
+                  </button>
+                  <button
+                    onClick={handlePreviewPlay}
+                    className={clsx(
+                      'flex items-center gap-2 rounded-xl px-4 py-3 text-base font-semibold text-white transition',
+                      isPreviewPlaying
+                        ? 'bg-orange-500 hover:bg-orange-600'
+                        : 'bg-green-500 hover:bg-green-600'
+                    )}
+                    title={isPreviewPlaying ? '정지' : '미리 듣기'}
+                  >
+                    {isPreviewPlaying ? (
+                      <>
+                        <Pause className="h-5 w-5" />
+                        정지
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-5 w-5" />
+                        미리 듣기
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleConfirmSend}
+                    className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-base font-semibold text-white transition hover:bg-indigo-700"
+                    title="전송"
+                  >
+                    <Send className="h-5 w-5" />
+                    전송
                   </button>
                 </div>
               ) : (
+                /* Idle State - Start Recording */
                 <div className="flex items-center gap-4">
                   <button
                     onClick={() => setInputMode('text')}

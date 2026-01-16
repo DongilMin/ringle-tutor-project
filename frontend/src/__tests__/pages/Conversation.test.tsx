@@ -62,6 +62,15 @@ vi.mock('../../hooks/useAudioRecorder', () => ({
     resetRecording: vi.fn(),
     error: null,
     mediaStream: null,
+    audioLevel: 0,
+    isVADActive: false,
+    vadConfig: {
+      enabled: true,
+      silenceThreshold: 15,
+      silenceDuration: 1500,
+      minRecordingTime: 1000,
+    },
+    setVADConfig: vi.fn(),
   }),
 }));
 

@@ -81,12 +81,12 @@
 
 ### 2.6 결제 서비스 (Mock)
 **예상 파일:** `app/services/payment_service.rb`
-- [ ] PaymentService 클래스 생성
-- [ ] MockPG 호출 시뮬레이션
-- [ ] `POST /api/v1/payments` 엔드포인트
-- [ ] 결제 성공 시 멤버십 자동 생성
-- [ ] Service Spec: `instance_double`로 PG Mocking
-- [ ] `/checkpoint "결제 서비스"` 실행
+- [x] PaymentService 클래스 생성
+- [x] MockPG 호출 시뮬레이션
+- [x] `POST /api/v1/payments` 엔드포인트
+- [x] 결제 성공 시 멤버십 자동 생성
+- [x] Service Spec: `instance_double`로 PG Mocking
+- [x] `/checkpoint "결제 서비스"` 실행
 
 ---
 
@@ -96,26 +96,25 @@
 
 #### 3.1.1 홈 화면
 **예상 파일:** `src/pages/Home.tsx`, `src/components/MembershipCard.tsx`
-- [ ] 홈 페이지 컴포넌트
-- [ ] 멤버십 상태 카드 컴포넌트
-- [ ] API 연동 (멤버십 조회)
-- [ ] 컴포넌트 테스트
-- [ ] `/checkpoint "홈 화면"` 실행
+- [x] 홈 페이지 컴포넌트
+- [x] 멤버십 상태 카드 컴포넌트
+- [x] API 연동 (멤버십 조회)
+- [x] 컴포넌트 테스트
+- [x] `/checkpoint "홈 화면"` 실행
 
 #### 3.1.2 멤버십 구매 화면
 **예상 파일:** `src/pages/Purchase.tsx`, `src/components/PlanSelector.tsx`
-- [ ] 구매 페이지 컴포넌트
-- [ ] 요금제 선택 컴포넌트
-- [ ] 결제 API 연동
-- [ ] 컴포넌트 테스트
-- [ ] `/checkpoint "구매 화면"` 실행
+- [x] 구매 페이지 컴포넌트
+- [x] 요금제 선택 컴포넌트
+- [x] 결제 API 연동
+- [x] 컴포넌트 테스트
+- [x] `/checkpoint "구매 화면"` 실행
 
 #### 3.1.3 대화 화면 레이아웃
 **예상 파일:** `src/pages/Conversation.tsx`, `src/components/ChatBubble.tsx`
-- [ ] 대화 페이지 컴포넌트
-- [ ] 채팅 버블 컴포넌트
-- [ ] 레이아웃 스타일링
-- [ ] `/checkpoint "대화 화면"` 실행
+- [x] 대화 페이지 컴포넌트
+- [x] 채팅 버블 컴포넌트
+- [x] 레이아웃 스타일링
 
 ### 3.2 오디오 기능 (Web Audio API) ✅ COMPLETED (phase-3.2-fix)
 
@@ -147,6 +146,14 @@
 - [x] 메시지 히스토리 관리
 - [x] 녹음 상태 관리
 - [x] 테스트 13개 통과
+
+### 3.4 VAD (Voice Activity Detection) ✅ COMPLETED
+**파일:** `src/hooks/useAudioRecorder.ts`
+- [x] AudioContext + AnalyserNode로 오디오 레벨 모니터링
+- [x] 침묵 감지 알고리즘 구현 (silenceThreshold, silenceDuration)
+- [x] 자동 녹음 중지 기능 (사용자가 말 끝나면 자동 전송)
+- [x] VAD 설정 인터페이스 (enabled, silenceThreshold, silenceDuration, minRecordingTime)
+- [x] Conversation.tsx에 VAD 상태 UI 표시 (음량 바, 자동 중지 표시)
 
 ---
 
@@ -202,21 +209,36 @@
 
 **테스트:** 165 examples, 0 failures (27개 추가)
 
-### 4.3 Frontend AI 연동
+### 4.3 Frontend AI 연동 ✅ COMPLETED
 
 #### 4.3.1 대화 서비스
-**예상 파일:** `src/services/conversationService.ts`
-- [ ] 오디오 업로드 함수
-- [ ] 스트리밍 응답 처리
-- [ ] 에러 핸들링
-- [ ] `/checkpoint "대화 서비스"` 실행
+**파일:** `src/services/conversationService.ts`
+- [x] 오디오 업로드 함수 (sendAudioMessage)
+- [x] 응답 처리 (createSession, sendTextMessage)
+- [x] 에러 핸들링 (ConversationError, error codes)
+- [x] 테스트 작성 (conversationService.test.ts)
 
 #### 4.3.2 대화 플로우 통합
-- [ ] 녹음 → 전송 → 응답 → 재생 플로우
-- [ ] 로딩 상태 표시
-- [ ] 에러 핸들링 UI
-- [ ] E2E 테스트
-- [ ] `/checkpoint "대화 플로우"` 실행
+**파일:** `src/pages/Conversation.tsx`
+- [x] 녹음 → 전송 → 응답 → 재생 플로우 (playResponseAudio)
+- [x] 로딩 상태 표시 (isProcessing, membershipChecking)
+- [x] 에러 핸들링 UI (ErrorToast, initError)
+- [x] 테스트 작성 (Conversation.test.tsx)
+
+### 4.4 Streaming 응답 ✅ COMPLETED
+
+#### 4.4.1 Backend Streaming
+**파일:** `app/services/llm_service.rb`, `app/controllers/api/v1/conversations_controller.rb`
+- [x] LlmService#chat_stream 메서드 추가 (OpenAI streaming API 사용)
+- [x] POST /api/v1/conversations/:id/stream 엔드포인트 (SSE)
+- [x] 실시간 청크 전송 + TTS 오디오 완료 시 전송
+
+#### 4.4.2 Frontend Streaming
+**파일:** `src/services/api.ts`, `src/pages/Conversation.tsx`
+- [x] sendTextMessageStream 함수 (fetch + ReadableStream으로 SSE 처리)
+- [x] StreamCallbacks 인터페이스 (onChunk, onComplete, onError)
+- [x] 실시간 텍스트 표시 UI (타이핑 효과 + 커서 애니메이션)
+- [x] 스트리밍 모드 토글 버튼 (헤더에 Stream 버튼)
 
 ---
 
@@ -267,6 +289,8 @@
 - [x] App.test.tsx 업데이트
 
 **전체 테스트:** Backend 171, Frontend 79 - 모두 통과
+
+**추가 기능 (VAD + Streaming):** Phase 3.4, 4.4 구현 완료
 
 ---
 

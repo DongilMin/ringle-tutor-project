@@ -4,8 +4,11 @@ module Api
   module V1
     class ConversationsController < BaseController
       include MembershipCheck
+      include RateLimiter
 
-      before_action :set_conversation, only: [ :show, :messages, :send_message, :send_audio ]
+      before_action :set_conversation, only: [ :show, :messages, :send_message, :send_audio, :stream_message ]
+      before_action :check_audio_rate_limit, only: [ :send_audio ]
+      before_action :check_text_rate_limit, only: [ :send_message, :stream_message ]
 
       # GET /api/v1/conversations
       def index
@@ -83,6 +86,65 @@ module Api
         render_error(message: "Server error: #{e.message}", status: :internal_server_error, code: "server_error")
       end
 
+      # POST /api/v1/conversations/:id/stream
+      # SSE streaming endpoint for real-time LLM responses
+      def stream_message
+        response.headers["Content-Type"] = "text/event-stream"
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["X-Accel-Buffering"] = "no"
+
+        # Create user message first
+        user_message = @conversation.messages.create!(
+          role: "user",
+          content: message_params[:content]
+        )
+
+        # Send user message event
+        response.stream.write("event: user_message\n")
+        response.stream.write("data: #{user_message.to_json}\n\n")
+
+        # Get conversation context
+        context = @conversation.messages.where.not(id: user_message.id).chronological.map do |m|
+          { role: m.role, content: m.content }
+        end
+
+        full_response = ""
+
+        # Stream LLM response (use memoized service)
+        llm_service.chat_stream(message_params[:content], context: context) do |chunk|
+          full_response += chunk
+          response.stream.write("event: chunk\n")
+          response.stream.write("data: #{chunk.to_json}\n\n")
+        end
+
+        # Create assistant message
+        assistant_message = @conversation.messages.create!(
+          role: "assistant",
+          content: full_response
+        )
+
+        # Generate TTS for the response (use memoized service)
+        tts_result = tts_service.synthesize(full_response)
+        audio_base64 = Base64.strict_encode64(tts_result[:audio_data])
+
+        # Send completion event with audio
+        completion_data = {
+          assistant_message: assistant_message.as_json,
+          audio: {
+            data: audio_base64,
+            content_type: tts_result[:content_type] || "audio/mpeg"
+          }
+        }
+        response.stream.write("event: complete\n")
+        response.stream.write("data: #{completion_data.to_json}\n\n")
+      rescue StandardError => e
+        Rails.logger.error("Stream error: #{e.message}")
+        response.stream.write("event: error\n")
+        response.stream.write("data: #{e.message.to_json}\n\n")
+      ensure
+        response.stream.close
+      end
+
       private
 
       def set_conversation
@@ -118,7 +180,28 @@ module Api
       end
 
       def conversation_service
-        @conversation_service ||= ConversationService.new
+        @conversation_service ||= ConversationService.new(
+          llm_service: llm_service,
+          tts_service: tts_service
+        )
+      end
+
+      def llm_service
+        @llm_service ||= LlmService.new
+      end
+
+      def tts_service
+        @tts_service ||= TtsService.new
+      end
+
+      def check_audio_rate_limit
+        limits = check_rate_limit!(:audio)
+        set_rate_limit_headers(limits)
+      end
+
+      def check_text_rate_limit
+        limits = check_rate_limit!(:text)
+        set_rate_limit_headers(limits)
       end
     end
   end

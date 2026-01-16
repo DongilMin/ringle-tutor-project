@@ -8,7 +8,7 @@ import { ArrowLeft, Plus, Trash2, Users, Crown, AlertCircle, LogOut } from 'luci
 const membershipLabels: Record<string, { name: string; color: string }> = {
   basic: { name: '베이직', color: 'bg-gray-500' },
   premium: { name: '프리미엄', color: 'bg-indigo-600' },
-  enterprise: { name: '엔터프라이즈', color: 'bg-purple-600' },
+  enterprise: { name: '엔터프라이즈', color: 'bg-amber-600' },
 };
 
 export default function Admin() {
@@ -323,6 +323,7 @@ export default function Admin() {
                   >
                     <option value="basic">베이직 (학습, 30일, ₩9,900)</option>
                     <option value="premium">프리미엄 (학습+대화+분석, 60일, ₩19,900)</option>
+                    <option value="enterprise">엔터프라이즈 (학습+대화+분석, 90일, ₩49,900)</option>
                   </select>
                 </div>
               </div>
