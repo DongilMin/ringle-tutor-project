@@ -1476,3 +1476,283 @@ Frontend: 118 tests passed
 
 ---
 
+## Phase 5.5 - E2E 테스트 구현 (Playwright)
+
+### [2026-01-16] 사용자 플로우 자동화 테스트
+
+#### 개요
+코드 리뷰 피드백: "단위 테스트 + Request Spec은 좋지만, 실제 사용자 플로우(홈→구매→대화)를 자동화 테스트로 검증하면 더 안정적"
+
+기존 테스트의 한계를 보완하기 위해 Playwright 기반 E2E 테스트 도입.
+
+#### 기술 선택: Playwright
+
+**Cypress vs Playwright 비교 후 Playwright 선택:**
+| 기준 | Cypress | Playwright |
+|------|---------|------------|
+| TypeScript 지원 | 좋음 | 우수 (네이티브) |
+| 브라우저 지원 | Chrome 중심 | Chrome, Firefox, Safari |
+| 속도 | 보통 | 빠름 (병렬 실행) |
+| 녹음/재생 | 별도 도구 | 내장 (codegen) |
+| API 테스트 | 제한적 | 풍부 |
+
+#### 생성 파일
+```
+frontend/
+├── playwright.config.ts                    # Playwright 설정
+├── e2e/
+│   ├── home.spec.ts                        # 홈페이지 테스트
+│   ├── purchase-flow.spec.ts               # 구매 플로우 테스트
+│   ├── conversation-flow.spec.ts           # 대화 플로우 테스트
+│   └── fixtures/
+│       └── test-audio.webm                 # 테스트용 오디오 파일
+└── package.json                            # playwright 의존성 추가
+```
+
+#### 핵심 코드
+
+**playwright.config.ts:**
+```typescript
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e',
+  timeout: 30000,
+  fullyParallel: true,
+  retries: process.env.CI ? 2 : 0,
+  reporter: 'html',
+  use: {
+    baseURL: 'http://localhost:5173',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+  ],
+  webServer: {
+    command: 'npm run dev',
+    url: 'http://localhost:5173',
+    reuseExistingServer: !process.env.CI,
+  },
+});
+```
+
+**e2e/home.spec.ts:**
+```typescript
+import { test, expect } from '@playwright/test';
+
+test.describe('홈페이지', () => {
+  test('페이지 로드 및 기본 요소 확인', async ({ page }) => {
+    await page.goto('/');
+
+    // 제목 확인
+    await expect(page.getByRole('heading', { name: /Ringle AI Tutor/i })).toBeVisible();
+
+    // 멤버십 카드 확인
+    await expect(page.getByText('현재 멤버십')).toBeVisible();
+
+    // CTA 버튼 확인
+    await expect(page.getByRole('button', { name: /시작하기|구매하기/i })).toBeVisible();
+  });
+
+  test('멤버십 없을 때 구매 페이지로 이동', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /구매하기/i }).click();
+    await expect(page).toHaveURL('/purchase');
+  });
+});
+```
+
+**e2e/purchase-flow.spec.ts:**
+```typescript
+import { test, expect } from '@playwright/test';
+
+test.describe('멤버십 구매 플로우', () => {
+  test('플랜 선택 → 결제 정보 입력 → 결제 완료', async ({ page }) => {
+    await page.goto('/purchase');
+
+    // Step 1: 플랜 로딩 확인
+    await expect(page.getByText('플랜 선택')).toBeVisible();
+
+    // Step 2: Premium 플랜 선택
+    await page.getByText('프리미엄').click();
+    await page.getByRole('button', { name: '선택하기' }).click();
+
+    // Step 3: 결제 정보 입력
+    await page.getByLabel('카드 번호').fill('4242424242424242');
+    await page.getByLabel('유효기간').fill('12/28');
+    await page.getByLabel('CVC').fill('123');
+
+    // Step 4: 결제 버튼 클릭
+    await page.getByRole('button', { name: '결제하기' }).click();
+
+    // Step 5: 성공 확인
+    await expect(page.getByText('결제가 완료되었습니다')).toBeVisible({ timeout: 10000 });
+  });
+
+  test('결제 실패 시 에러 메시지 표시', async ({ page }) => {
+    await page.goto('/purchase');
+
+    await page.getByText('베이직').click();
+    await page.getByRole('button', { name: '선택하기' }).click();
+
+    // 잘못된 카드 정보
+    await page.getByLabel('카드 번호').fill('0000000000000000');
+    await page.getByRole('button', { name: '결제하기' }).click();
+
+    await expect(page.getByText(/결제.*실패|오류/i)).toBeVisible();
+  });
+});
+```
+
+**e2e/conversation-flow.spec.ts:**
+```typescript
+import { test, expect } from '@playwright/test';
+
+test.describe('AI 대화 플로우', () => {
+  test.beforeEach(async ({ page }) => {
+    // 멤버십이 있는 상태로 시작 (API mock 또는 seed data)
+    await page.goto('/conversation');
+  });
+
+  test('대화 시작 시 AI 인사말 표시', async ({ page }) => {
+    await expect(page.getByText(/Hello|안녕/i)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('텍스트 메시지 전송 및 AI 응답 수신', async ({ page }) => {
+    // 텍스트 입력 모드로 전환 (있다면)
+    const textInput = page.getByPlaceholder(/메시지|message/i);
+
+    if (await textInput.isVisible()) {
+      await textInput.fill('Hello, I want to practice English.');
+      await page.getByRole('button', { name: /전송|send/i }).click();
+
+      // 사용자 메시지 표시 확인
+      await expect(page.getByText('Hello, I want to practice English.')).toBeVisible();
+
+      // AI 응답 대기 및 확인
+      await expect(page.locator('.ai-message, [data-sender="ai"]').last()).toBeVisible({
+        timeout: 15000,
+      });
+    }
+  });
+
+  test('녹음 버튼 클릭 시 권한 요청', async ({ page, context }) => {
+    // 마이크 권한 거부 시뮬레이션
+    await context.grantPermissions([]);
+
+    const recordButton = page.getByRole('button', { name: /녹음|record/i });
+    await recordButton.click();
+
+    // 권한 에러 또는 요청 안내 메시지
+    await expect(page.getByText(/마이크.*권한|permission/i)).toBeVisible();
+  });
+
+  test('Rate Limit 에러 시 사용자 친화적 메시지', async ({ page }) => {
+    // 빠른 연속 요청으로 Rate Limit 트리거
+    const sendButton = page.getByRole('button', { name: /전송|send/i });
+    const textInput = page.getByPlaceholder(/메시지|message/i);
+
+    if (await textInput.isVisible()) {
+      for (let i = 0; i < 5; i++) {
+        await textInput.fill(`Test message ${i}`);
+        await sendButton.click();
+        await page.waitForTimeout(100); // 빠른 연속 요청
+      }
+
+      // Rate Limit 에러 메시지 확인
+      await expect(page.getByText(/요청.*많습니다|rate limit/i)).toBeVisible({
+        timeout: 5000,
+      });
+    }
+  });
+});
+```
+
+#### 실행 방법
+```bash
+# Playwright 설치
+cd frontend && npm install -D @playwright/test
+npx playwright install
+
+# E2E 테스트 실행
+npm run test:e2e
+
+# 특정 브라우저만 실행
+npm run test:e2e -- --project=chromium
+
+# UI 모드로 디버깅
+npm run test:e2e -- --ui
+
+# 테스트 녹화로 코드 생성
+npx playwright codegen localhost:5173
+```
+
+#### package.json 스크립트 추가
+```json
+{
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug"
+  }
+}
+```
+
+#### 테스트 계층 구조
+```
+[테스트 피라미드]
+
+         /\
+        /  \        E2E Tests (Playwright)
+       /    \       - 사용자 플로우 검증
+      /------\      - 크로스 브라우저
+     /        \
+    /   Unit   \    Unit Tests (Vitest)
+   /   Tests    \   - 컴포넌트, 훅, 서비스
+  /--------------\  - 빠른 피드백
+ /                \
+/   Request Spec   \  Integration Tests (RSpec)
+--------------------  - API 엔드포인트
+                      - 비즈니스 로직
+```
+
+#### CI 통합 (GitHub Actions)
+```yaml
+# .github/workflows/e2e.yml
+name: E2E Tests
+on: [push, pull_request]
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+      - name: Install dependencies
+        run: cd frontend && npm ci
+      - name: Install Playwright
+        run: cd frontend && npx playwright install --with-deps
+      - name: Start Backend
+        run: cd backend && rails s &
+      - name: Run E2E tests
+        run: cd frontend && npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+```
+
+#### 핵심 인사이트
+1. **테스트 계층 완성**: Unit → Integration → E2E로 전체 테스트 피라미드 구축
+2. **실제 사용자 관점**: 기술적 단위가 아닌 사용자 시나리오 기반 테스트
+3. **크로스 브라우저**: Chrome, Firefox, Safari에서 동일한 경험 보장
+4. **디버깅 효율**: Playwright의 trace, screenshot, video로 실패 원인 빠르게 파악
+
+### Screenshot
+[docs/screenshots/05_e2e_tests/]
+
+---
+
