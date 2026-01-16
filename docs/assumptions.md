@@ -142,15 +142,22 @@
 
 ## 8. 테스트 전략
 
-### Backend (RSpec)
-- Model Spec: 비즈니스 로직 검증
+### Backend (RSpec) - 221개 테스트
+- Model Spec: 비즈니스 로직 검증, 경계값 테스트
 - Request Spec: API 엔드포인트 통합 테스트
 - Service Spec: 외부 API는 Mock 처리
+- Concern Spec: Rate Limiting 등 횡단 관심사
 
-### Frontend (Vitest)
+### Frontend (Vitest) - 118개 테스트
 - Component: React Testing Library
 - Hooks: renderHook 사용
 - 브라우저 API: Mock 필수 (MediaRecorder, AudioContext 등)
+
+### E2E (Playwright) - 13개 테스트 x 3 브라우저
+- 홈페이지 렌더링 및 네비게이션
+- 멤버십 구매 플로우
+- AI 대화 플로우
+- 크로스 브라우저: Chrome, Firefox, Safari
 
 ---
 
@@ -205,7 +212,42 @@ Retry-After: 2 (rate limit 초과 시)
 
 ---
 
-## 11. 향후 개선 사항
+## 11. SSE Streaming (응답 지연 최소화)
+
+### 구현 방식
+- LLM 응답을 Server-Sent Events로 실시간 스트리밍
+- 첫 토큰 도착 즉시 화면에 표시 → 체감 지연 시간 최소화
+
+### 엔드포인트
+```
+POST /api/v1/conversations/:id/stream
+Content-Type: text/event-stream
+```
+
+### 이벤트 형식
+```
+event: chunk
+data: {"text": "Hello"}
+
+event: complete
+data: {"message_id": 123, "audio": {...}}
+```
+
+---
+
+## 12. Single Source of Truth (SSoT)
+
+### 적용 항목
+- **멤버십 플랜 정보**: 가격, 기간, 기능이 Backend `Membership` 모델에만 정의
+- **Frontend**는 `/api/v1/membership_plans` API로 플랜 정보 조회
+
+### 이점
+- 가격/정책 변경 시 Backend만 수정
+- Frontend-Backend 데이터 불일치 방지
+
+---
+
+## 13. 향후 개선 사항
 
 1. **인증**: JWT 기반 인증 구현
 2. **결제**: 실제 PG사 연동 (포트원, 토스페이먼츠 등)
@@ -213,3 +255,4 @@ Retry-After: 2 (rate limit 초과 시)
 4. **관리자**: 어드민 권한 체계 구현
 5. **알림**: 멤버십 만료 알림 (이메일, 푸시)
 6. **Rate Limiting**: Redis 기반 분산 환경 지원
+7. **VAD 고도화**: WebRTC VAD로 실시간 음성 구간 검출
