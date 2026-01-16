@@ -30,7 +30,7 @@ module ResponseRenderer
     render_success(data: data, meta: meta)
   end
 
-  def render_resource(record, serializer:, status: :ok)
-    render_success(data: serializer.new(record).as_json, status: status)
+  def render_resource(record, serializer:, status: :ok, meta: nil)
+    render_success(data: serializer.new(record).as_json, status: status, meta: meta)
   end
 end

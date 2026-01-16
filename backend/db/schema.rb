@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_01_15_103950) do
+ActiveRecord::Schema[8.1].define(version: 2026_01_15_145238) do
   create_table "conversations", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "status", default: "active", null: false
@@ -24,7 +24,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_15_103950) do
   create_table "memberships", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.date "end_date", null: false
+    t.json "features", default: []
+    t.boolean "is_usage_based", default: false, null: false
     t.string "membership_type", null: false
+    t.integer "remaining_conversations"
     t.date "start_date", null: false
     t.string "status", default: "active", null: false
     t.datetime "updated_at", null: false

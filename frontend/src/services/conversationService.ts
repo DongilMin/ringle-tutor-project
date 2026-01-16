@@ -76,11 +76,11 @@ export async function createSession(): Promise<
   if (!response.success || !response.data) {
     return {
       success: false,
-      error: createError('SESSION_CREATE_FAILED', response.error?.message),
+      error: createError('SESSION_CREATE_FAILED', (response.error as any)?.message),
     };
   }
 
-  const conversation = response.data;
+  const conversation = response.data as ConversationDetail;
   return {
     success: true,
     conversationId: conversation.id,
@@ -105,11 +105,11 @@ export async function restoreSession(conversationId: number): Promise<
   if (!response.success || !response.data) {
     return {
       success: false,
-      error: createError('SESSION_NOT_FOUND', response.error?.message),
+      error: createError('SESSION_NOT_FOUND', (response.error as any)?.message),
     };
   }
 
-  const conversation = response.data;
+  const conversation = response.data as ConversationDetail;
   return {
     success: true,
     conversation,
@@ -146,36 +146,36 @@ export async function sendAudioMessage(
   const response = await conversationApi.sendAudio(conversationId, audioBlob, contentType);
 
   if (!response.success || !response.data) {
-    const errorCode = response.error?.code;
+    const errorCode = (response.error as any)?.code;
 
     // Map specific error codes to user-friendly errors
     if (errorCode === 'TRANSCRIPTION_FAILED') {
       return {
         success: false,
-        error: createError('TRANSCRIPTION_FAILED', response.error?.message),
+        error: createError('TRANSCRIPTION_FAILED', (response.error as any)?.message),
       };
     }
 
     if (errorCode === 'NETWORK_ERROR') {
       return {
         success: false,
-        error: createError('NETWORK_ERROR', response.error?.message),
+        error: createError('NETWORK_ERROR', (response.error as any)?.message),
       };
     }
 
     return {
       success: false,
-      error: createError('AUDIO_UPLOAD_FAILED', response.error?.message),
+      error: createError('AUDIO_UPLOAD_FAILED', (response.error as any)?.message),
     };
   }
 
-  const data: AudioSendResponse = response.data;
+  const data: AudioSendResponse = response.data as AudioSendResponse;
 
   return {
     success: true,
     userMessage: mapMessageToUI(data.user_message),
     assistantMessage: mapMessageToUI(data.assistant_message),
-    transcribedText: data.transcribed_text,
+    transcribedText: data.transcribed_text || '',
     audioUrl: data.audio_url,
   };
 }
@@ -200,14 +200,16 @@ export async function sendTextMessage(
   if (!response.success || !response.data) {
     return {
       success: false,
-      error: createError('AI_RESPONSE_FAILED', response.error?.message),
+      error: createError('AI_RESPONSE_FAILED', (response.error as any)?.message),
     };
   }
 
+  const data = response.data as { user_message: MessageData; assistant_message: MessageData };
+
   return {
     success: true,
-    userMessage: mapMessageToUI(response.data.user_message),
-    assistantMessage: mapMessageToUI(response.data.assistant_message),
+    userMessage: mapMessageToUI(data.user_message),
+    assistantMessage: mapMessageToUI(data.assistant_message),
   };
 }
 
@@ -227,12 +229,14 @@ export async function getConversationHistory(conversationId: number): Promise<
   if (!response.success || !response.data) {
     return {
       success: false,
-      error: createError('SESSION_NOT_FOUND', response.error?.message),
+      error: createError('SESSION_NOT_FOUND', (response.error as any)?.message),
     };
   }
 
+  const messages = response.data as MessageData[];
+
   return {
     success: true,
-    messages: Array.isArray(response.data) ? response.data.map(mapMessageToUI) : [],
+    messages: Array.isArray(messages) ? messages.map(mapMessageToUI) : [],
   };
 }

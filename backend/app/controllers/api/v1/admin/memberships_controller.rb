@@ -15,8 +15,25 @@ module Api
         end
 
         def create
-          user = User.find(params[:user_id])
-          membership = user.memberships.build(membership_params)
+          user = User.find(params[:user_id] || params.dig(:membership, :user_id))
+
+          # Check for existing active membership (duplicate prevention)
+          if user.memberships.active.exists?
+            return render_error(
+              message: "User already has an active membership",
+              status: :unprocessable_entity,
+              code: "DUPLICATE_MEMBERSHIP",
+              details: [ "이 유저는 이미 활성 멤버십을 보유하고 있습니다" ]
+            )
+          end
+
+          membership = user.memberships.build(membership_params.except(:user_id))
+
+          # Set default values based on membership type
+          membership.start_date ||= Date.current
+          membership.end_date ||= membership.start_date + duration_for(membership.membership_type).days
+          membership.status ||= "active"
+          membership.features ||= Membership::MEMBERSHIP_FEATURES[membership.membership_type]
 
           if membership.save
             render_resource(membership, serializer: MembershipSerializer, status: :created)
@@ -49,11 +66,19 @@ module Api
 
         def membership_params
           params.require(:membership).permit(
+            :user_id,
             :membership_type,
             :start_date,
             :end_date,
-            :status
+            :status,
+            :remaining_conversations,
+            :is_usage_based,
+            features: []
           )
+        end
+
+        def duration_for(membership_type)
+          Membership::MEMBERSHIP_DURATION_DAYS[membership_type] || 30
         end
       end
     end

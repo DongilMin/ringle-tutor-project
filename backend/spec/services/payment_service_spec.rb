@@ -49,7 +49,7 @@ RSpec.describe PaymentService do
       it 'sets correct amount based on membership type' do
         result = service.process
 
-        expect(result[:payment].amount).to eq(29_900)
+        expect(result[:payment].amount).to eq(9_900)  # basic price
       end
 
       context 'with premium membership' do
@@ -58,7 +58,7 @@ RSpec.describe PaymentService do
         it 'charges premium price' do
           result = service.process
 
-          expect(result[:payment].amount).to eq(59_900)
+          expect(result[:payment].amount).to eq(19_900)
         end
       end
 
@@ -68,7 +68,7 @@ RSpec.describe PaymentService do
         it 'charges enterprise price' do
           result = service.process
 
-          expect(result[:payment].amount).to eq(99_900)
+          expect(result[:payment].amount).to eq(49_900)
         end
       end
     end
@@ -148,7 +148,7 @@ RSpec.describe PaymentService do
 
       expect(mock_client).to have_received(:charge).with(
         hash_including(
-          amount: 29_900,
+          amount: 9_900,  # basic price
           payment_method: 'credit_card'
         )
       )

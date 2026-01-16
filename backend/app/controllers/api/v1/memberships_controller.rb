@@ -14,6 +14,9 @@ module Api
       end
 
       def current
+        # Auto-expire any memberships that are past their end date
+        current_user.memberships.expired_but_active.find_each(&:check_and_expire!)
+
         membership = current_user.active_membership
 
         if membership

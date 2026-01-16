@@ -24,11 +24,13 @@ Rails.application.routes.draw do
           get :messages
           post :messages, action: :send_message
           post :audio, action: :send_audio
+          post :stream, action: :stream_message
         end
       end
 
       # Admin endpoints
       namespace :admin do
+        resources :users, only: [ :index ]
         resources :memberships, only: [ :index, :show, :create, :destroy ]
       end
     end

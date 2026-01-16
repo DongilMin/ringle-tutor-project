@@ -9,24 +9,39 @@ RSpec.describe TtsService do
     let(:text) { "Hello, this is a test." }
 
     context "with valid text" do
+      before do
+        stub_request(:post, "https://api.openai.com/v1/audio/speech")
+          .to_return(
+            status: 200,
+            body: "fake_audio_binary_data",
+            headers: { "Content-Type" => "audio/mp3" }
+          )
+      end
+
       it "returns audio data" do
         result = service.synthesize(text)
 
         expect(result[:audio_data]).to be_present
-        expect(result[:format]).to eq("audio/mp3")
-        expect(result[:duration]).to be_a(Numeric)
+        expect(result[:content_type]).to eq("audio/mp3")
       end
 
       it "accepts custom voice" do
-        result = service.synthesize(text, voice: "en-GB-Standard-A")
+        result = service.synthesize(text, voice: "echo")
 
         expect(result[:audio_data]).to be_present
       end
 
       it "accepts custom format" do
-        result = service.synthesize(text, format: "audio/wav")
+        stub_request(:post, "https://api.openai.com/v1/audio/speech")
+          .to_return(
+            status: 200,
+            body: "fake_audio_binary_data",
+            headers: { "Content-Type" => "audio/wav" }
+          )
 
-        expect(result[:format]).to eq("audio/wav")
+        result = service.synthesize(text, format: "wav")
+
+        expect(result[:content_type]).to eq("audio/wav")
       end
     end
 
@@ -57,7 +72,16 @@ RSpec.describe TtsService do
     end
 
     context "with supported voices" do
-      %w[en-US-Standard-A en-US-Standard-B en-GB-Standard-A].each do |voice|
+      before do
+        stub_request(:post, "https://api.openai.com/v1/audio/speech")
+          .to_return(
+            status: 200,
+            body: "fake_audio_binary_data",
+            headers: { "Content-Type" => "audio/mp3" }
+          )
+      end
+
+      %w[alloy echo fable onyx nova shimmer].each do |voice|
         it "accepts #{voice}" do
           result = service.synthesize(text, voice: voice)
 
@@ -68,11 +92,26 @@ RSpec.describe TtsService do
   end
 
   describe "error handling" do
-    it "wraps timeout errors" do
-      allow(service).to receive(:call_tts_api).and_raise(Timeout::Error)
+    let(:text) { "Test text" }
 
-      expect { service.synthesize("Test") }
+    it "wraps timeout errors" do
+      stub_request(:post, "https://api.openai.com/v1/audio/speech")
+        .to_timeout
+
+      expect { service.synthesize(text) }
         .to raise_error(TtsService::TimeoutError, /timed out/)
+    end
+
+    it "handles API errors" do
+      stub_request(:post, "https://api.openai.com/v1/audio/speech")
+        .to_return(
+          status: 400,
+          body: { error: { message: "Invalid request" } }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      expect { service.synthesize(text) }
+        .to raise_error(TtsService::ApiError, /400/)
     end
   end
 end

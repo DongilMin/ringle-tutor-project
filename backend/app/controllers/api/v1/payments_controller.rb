@@ -2,11 +2,16 @@ module Api
   module V1
     class PaymentsController < BaseController
       def create
+        puts "PaymentsController#create called with params: #{payment_params.inspect}"
+        puts "Current User: #{current_user.inspect}"
+
         result = PaymentService.new(
           user: current_user,
           membership_type: payment_params[:membership_type],
           payment_method: payment_params[:payment_method]
         ).process
+
+        puts "PaymentService Result: #{result.inspect}"
 
         if result[:success]
           render_success(

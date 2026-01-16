@@ -9,24 +9,42 @@ class LlmService
   class RateLimitError < LlmError; end
   class InvalidPromptError < LlmError; end
 
-  DEFAULT_MODEL = "gemini-1.5-flash"
+  DEFAULT_MODEL = "gpt-4o-mini"
   MAX_TOKENS = 2048
   DEFAULT_TIMEOUT = 60
 
   SYSTEM_PROMPT = <<~PROMPT
-    You are an AI English tutor helping users practice English conversation.
-    Your role is to:
-    1. Engage in natural conversation with the user
-    2. Gently correct grammar and pronunciation mistakes
-    3. Suggest better ways to express ideas
-    4. Keep responses concise and conversational (2-3 sentences)
-    5. Be encouraging and supportive
+    You are Ringle AI Tutor, a friendly and professional English conversation coach.
 
-    Respond naturally as if you're having a real conversation.
+    ## Your Teaching Style
+    - Speak naturally like a native English speaker having a real conversation
+    - Keep responses concise (2-3 sentences max) to encourage user participation
+    - Be warm, encouraging, and supportive - celebrate progress!
+    - Ask follow-up questions to keep the conversation flowing
+
+    ## Topic Consistency Rules
+    - Stay focused on the current conversation topic
+    - If the user introduces a new topic, smoothly transition while acknowledging the change
+    - Periodically reference earlier parts of the conversation to show you're engaged
+    - Don't abruptly change subjects unless the user does
+
+    ## Language Correction Guidelines
+    - Only correct significant errors that affect meaning or sound unnatural
+    - Use gentle, implicit corrections by naturally rephrasing what the user said
+    - Example: If user says "I goed to store", respond "Oh, you went to the store! What did you buy?"
+    - Don't over-correct minor mistakes - fluency over perfection
+    - Save explicit grammar explanations for repeated errors
+
+    ## Response Format
+    - Respond directly to what the user said
+    - Include a natural follow-up question when appropriate
+    - Keep the conversation balanced - don't dominate with long explanations
+
+    Remember: Your goal is to build the user's confidence in speaking English naturally.
   PROMPT
 
   def initialize(api_key: nil, model: DEFAULT_MODEL)
-    @api_key = api_key || ENV.fetch("GEMINI_API_KEY", nil)
+    @api_key = api_key || ENV.fetch("OPENAI_API_KEY", nil)
     @model = model
     @conversation_history = []
   end
@@ -37,13 +55,35 @@ class LlmService
     @conversation_history = context if context.present?
     @conversation_history << { role: "user", content: user_message }
 
-    response = call_gemini_api
+    response = call_openai_api
     assistant_message = parse_response(response)
 
     @conversation_history << { role: "assistant", content: assistant_message }
 
     {
       message: assistant_message,
+      conversation_history: @conversation_history
+    }
+  end
+
+  # Streaming chat - yields chunks to the block
+  def chat_stream(user_message, context: [], &block)
+    validate_message!(user_message)
+
+    @conversation_history = context if context.present?
+    @conversation_history << { role: "user", content: user_message }
+
+    full_response = ""
+
+    call_openai_api_stream do |chunk|
+      full_response += chunk
+      block.call(chunk) if block
+    end
+
+    @conversation_history << { role: "assistant", content: full_response }
+
+    {
+      message: full_response,
       conversation_history: @conversation_history
     }
   end
@@ -61,48 +101,18 @@ class LlmService
     raise InvalidPromptError, "Message is too long (max 10000 characters)" if message.length > 10_000
   end
 
-  def call_gemini_api
-    if Rails.env.test? || ENV["LLM_MOCK_ENABLED"] == "true"
-      mock_response
-    else
-      real_api_call
-    end
-  end
-
-  def mock_response
-    last_user_message = @conversation_history.last[:content]
-
-    {
-      "candidates" => [
-        {
-          "content" => {
-            "parts" => [
-              { "text" => generate_mock_reply(last_user_message) }
-            ]
-          }
-        }
-      ]
-    }
-  end
-
-  def generate_mock_reply(user_message)
-    if user_message.downcase.include?("hello") || user_message.downcase.include?("hi")
-      "Hello! Great to see you. What would you like to practice today?"
-    elsif user_message.downcase.include?("thank")
-      "You're welcome! Keep up the great work with your English practice."
-    else
-      "That's a great point! Let me help you express that more naturally."
-    end
-  end
-
-  def real_api_call
-    uri = URI.parse(gemini_endpoint)
+  def call_openai_api
+    uri = URI.parse("https://api.openai.com/v1/chat/completions")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
+    http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+    http.cert_store = OpenSSL::X509::Store.new
+    http.cert_store.set_default_paths
     http.open_timeout = DEFAULT_TIMEOUT
     http.read_timeout = DEFAULT_TIMEOUT
 
-    request = Net::HTTP::Post.new("#{uri.path}?key=#{@api_key}")
+    request = Net::HTTP::Post.new(uri.path)
+    request["Authorization"] = "Bearer #{@api_key}"
     request["Content-Type"] = "application/json"
     request.body = build_request_body.to_json
 
@@ -111,46 +121,82 @@ class LlmService
     JSON.parse(response.body)
   end
 
-  def build_request_body
-    {
-      contents: build_contents,
-      generationConfig: {
-        maxOutputTokens: MAX_TOKENS,
-        temperature: 0.7
-      }
-    }
+  def call_openai_api_stream(&block)
+    uri = URI.parse("https://api.openai.com/v1/chat/completions")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+    http.cert_store = OpenSSL::X509::Store.new
+    http.cert_store.set_default_paths
+    http.open_timeout = DEFAULT_TIMEOUT
+    http.read_timeout = DEFAULT_TIMEOUT
+
+    request = Net::HTTP::Post.new(uri.path)
+    request["Authorization"] = "Bearer #{@api_key}"
+    request["Content-Type"] = "application/json"
+    request.body = build_request_body(stream: true).to_json
+
+    http.request(request) do |response|
+      handle_response_errors(response)
+
+      buffer = ""
+      response.read_body do |chunk|
+        buffer += chunk
+        while (line_end = buffer.index("\n"))
+          line = buffer.slice!(0..line_end).strip
+          next if line.empty?
+          next unless line.start_with?("data: ")
+
+          data = line[6..]
+          next if data == "[DONE]"
+
+          parsed = JSON.parse(data) rescue nil
+          next unless parsed
+
+          content = parsed.dig("choices", 0, "delta", "content")
+          block.call(content) if content && block
+        end
+      end
+    end
   end
 
-  def build_contents
-    contents = [
-      { role: "user", parts: [ { text: SYSTEM_PROMPT } ] },
-      { role: "model", parts: [ { text: "I understand. I'm ready to help with English practice." } ] }
+  def build_request_body(stream: false)
+    body = {
+      model: @model,
+      messages: build_messages,
+      max_tokens: MAX_TOKENS,
+      temperature: 0.7
+    }
+    body[:stream] = true if stream
+    body
+  end
+
+  def build_messages
+    messages = [
+      { role: "system", content: SYSTEM_PROMPT }
     ]
 
     @conversation_history.each do |msg|
-      role = msg[:role] == "assistant" ? "model" : "user"
-      contents << { role: role, parts: [ { text: msg[:content] } ] }
+      messages << { role: msg[:role], content: msg[:content] }
     end
 
-    contents
-  end
-
-  def gemini_endpoint
-    "https://generativelanguage.googleapis.com/v1beta/models/#{@model}:generateContent"
+    messages
   end
 
   def handle_response_errors(response)
     case response.code.to_i
     when 200..299 then nil
     when 429 then raise RateLimitError, "API rate limit exceeded"
-    when 400..499 then raise ApiError, "Client error: #{response.body}"
+    when 400..499
+      error_body = JSON.parse(response.body) rescue { "error" => response.body }
+      raise ApiError, "Client error: #{error_body.dig("error", "message") || response.body}"
     when 500..599 then raise ApiError, "Server error: #{response.body}"
     else raise ApiError, "Unexpected response: #{response.code}"
     end
   end
 
   def parse_response(response)
-    text = response.dig("candidates", 0, "content", "parts", 0, "text")
+    text = response.dig("choices", 0, "message", "content")
     raise ApiError, "Empty response from API" if text.blank?
 
     text

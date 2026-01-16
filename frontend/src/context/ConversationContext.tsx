@@ -10,7 +10,7 @@ export interface Message {
   audioUrl?: string;
 }
 
-export type ConversationState = 'idle' | 'recording' | 'processing' | 'playing';
+export type ConversationState = 'idle' | 'recording' | 'preview' | 'processing' | 'playing';
 
 interface ConversationContextState {
   messages: Message[];

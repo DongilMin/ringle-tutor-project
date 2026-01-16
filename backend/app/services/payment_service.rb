@@ -3,18 +3,6 @@ class PaymentService
   class InvalidStateError < PaymentError; end
   class PgError < PaymentError; end
 
-  MEMBERSHIP_PRICES = {
-    "basic" => 29_900,
-    "premium" => 59_900,
-    "enterprise" => 99_900
-  }.freeze
-
-  MEMBERSHIP_DURATION = {
-    "basic" => 30,
-    "premium" => 30,
-    "enterprise" => 30
-  }.freeze
-
   def initialize(user:, membership_type:, payment_method:)
     @user = user
     @membership_type = membership_type
@@ -67,7 +55,7 @@ class PaymentService
 
   def create_payment
     user.payments.create!(
-      amount: MEMBERSHIP_PRICES[membership_type],
+      amount: Membership::MEMBERSHIP_PRICES[membership_type],
       payment_method: payment_method,
       status: "pending"
     )
@@ -114,8 +102,9 @@ class PaymentService
     user.memberships.create!(
       membership_type: membership_type,
       start_date: Date.current,
-      end_date: Date.current + MEMBERSHIP_DURATION[membership_type].days,
-      status: "active"
+      end_date: Date.current + Membership::MEMBERSHIP_DURATION_DAYS[membership_type].days,
+      status: "active",
+      features: Membership::MEMBERSHIP_FEATURES[membership_type]
     )
   end
 end
