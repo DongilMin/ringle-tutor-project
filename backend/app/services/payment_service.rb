@@ -99,6 +99,9 @@ class PaymentService
   end
 
   def create_membership
+    # Cancel existing active memberships before creating new one
+    user.memberships.currently_valid.update_all(status: "cancelled")
+
     user.memberships.create!(
       membership_type: membership_type,
       start_date: Date.current,

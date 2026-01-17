@@ -53,15 +53,10 @@ export default function Admin() {
     }
   };
 
-  // Get users who already have active membership (for duplicate prevention)
+  // Get users who already have active membership (for UI indication)
   const usersWithActiveMembership = useMemo(() => {
     return new Set(memberships.filter((m) => m.status === 'active').map((m) => m.user_id));
   }, [memberships]);
-
-  // Filter users who don't have active membership
-  const availableUsers = useMemo(() => {
-    return users.filter((u) => !usersWithActiveMembership.has(u.id));
-  }, [users, usersWithActiveMembership]);
 
   const handleCreate = async () => {
     setCreateError(null);
@@ -73,10 +68,12 @@ export default function Admin() {
 
     const userId = parseInt(createForm.user_id);
 
-    // Client-side duplicate check
+    // Show confirmation if user already has active membership
     if (usersWithActiveMembership.has(userId)) {
-      setCreateError('이 유저는 이미 활성 멤버십을 보유하고 있습니다');
-      return;
+      const confirmed = window.confirm(
+        '이 유저는 이미 활성 멤버십을 보유하고 있습니다.\n새 멤버십을 부여하면 기존 멤버십이 취소됩니다.\n계속하시겠습니까?'
+      );
+      if (!confirmed) return;
     }
 
     setCreating(true);
@@ -91,11 +88,7 @@ export default function Admin() {
       loadData();
     } catch (error) {
       console.error('Failed to create membership', error);
-      if (error instanceof Error && error.message.includes('duplicate')) {
-        setCreateError('이 유저는 이미 활성 멤버십을 보유하고 있습니다');
-      } else {
-        setCreateError('멤버십 생성에 실패했습니다');
-      }
+      setCreateError('멤버십 생성에 실패했습니다');
     } finally {
       setCreating(false);
     }
@@ -288,52 +281,44 @@ export default function Admin() {
               </div>
             )}
 
-            {/* No available users warning */}
-            {availableUsers.length === 0 ? (
-              <div className="rounded-lg bg-yellow-50 px-4 py-3 text-sm text-yellow-700">
-                모든 유저가 이미 활성 멤버십을 보유하고 있습니다.
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">유저 선택</label>
+                <select
+                  value={createForm.user_id}
+                  onChange={(e) => {
+                    setCreateForm({ ...createForm, user_id: e.target.value });
+                    setCreateError(null);
+                  }}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="">유저를 선택하세요</option>
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name} ({user.email})
+                      {usersWithActiveMembership.has(user.id) ? ' [활성 멤버십 있음]' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  기존 활성 멤버십이 있는 유저에게 부여 시 기존 멤버십은 취소됩니다
+                </p>
               </div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">유저 선택</label>
-                  <select
-                    value={createForm.user_id}
-                    onChange={(e) => {
-                      setCreateForm({ ...createForm, user_id: e.target.value });
-                      setCreateError(null);
-                    }}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  >
-                    <option value="">유저를 선택하세요</option>
-                    {availableUsers.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.name} ({user.email})
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {availableUsers.length}명의 유저에게 멤버십 부여 가능
-                  </p>
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">
-                    멤버십 종류
-                  </label>
-                  <select
-                    value={createForm.membership_type}
-                    onChange={(e) =>
-                      setCreateForm({ ...createForm, membership_type: e.target.value })
-                    }
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  >
-                    <option value="basic">베이직 (학습, 30일, ₩9,900)</option>
-                    <option value="premium">프리미엄 (학습+대화+분석, 60일, ₩19,900)</option>
-                    <option value="enterprise">엔터프라이즈 (학습+대화+분석, 90일, ₩49,900)</option>
-                  </select>
-                </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">멤버십 종류</label>
+                <select
+                  value={createForm.membership_type}
+                  onChange={(e) =>
+                    setCreateForm({ ...createForm, membership_type: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="basic">베이직 (학습, 30일, ₩9,900)</option>
+                  <option value="premium">프리미엄 (학습+대화+분석, 60일, ₩19,900)</option>
+                  <option value="enterprise">엔터프라이즈 (학습+대화+분석, 90일, ₩49,900)</option>
+                </select>
               </div>
-            )}
+            </div>
 
             <div className="mt-6 flex justify-end gap-3">
               <button
@@ -348,7 +333,7 @@ export default function Admin() {
               </button>
               <button
                 onClick={handleCreate}
-                disabled={creating || availableUsers.length === 0}
+                disabled={creating || users.length === 0}
                 className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {creating ? '처리 중...' : '부여'}

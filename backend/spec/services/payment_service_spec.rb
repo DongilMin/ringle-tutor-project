@@ -118,8 +118,11 @@ RSpec.describe PaymentService do
           transaction_id: 'TXN_TEST_123'
         )
         # 멤버십 생성 실패 시뮬레이션
-        allow_any_instance_of(User).to receive_message_chain(:memberships, :create!)
-          .and_raise(ActiveRecord::RecordInvalid)
+        memberships_double = double('memberships')
+        allow(memberships_double).to receive(:currently_valid).and_return(memberships_double)
+        allow(memberships_double).to receive(:update_all)
+        allow(memberships_double).to receive(:create!).and_raise(ActiveRecord::RecordInvalid)
+        allow_any_instance_of(User).to receive(:memberships).and_return(memberships_double)
       end
 
       it 'rolls back payment on membership creation failure' do

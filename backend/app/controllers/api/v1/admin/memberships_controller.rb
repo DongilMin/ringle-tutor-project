@@ -19,15 +19,8 @@ module Api
         def create
           user = User.find(params[:user_id] || params.dig(:membership, :user_id))
 
-          # Check for existing active membership (duplicate prevention)
-          if user.memberships.active.exists?
-            return render_error(
-              message: "User already has an active membership",
-              status: :unprocessable_entity,
-              code: "DUPLICATE_MEMBERSHIP",
-              details: [ "이 유저는 이미 활성 멤버십을 보유하고 있습니다" ]
-            )
-          end
+          # Cancel existing active memberships before creating new one
+          user.memberships.currently_valid.update_all(status: "cancelled")
 
           membership = user.memberships.build(membership_params.except(:user_id))
 
