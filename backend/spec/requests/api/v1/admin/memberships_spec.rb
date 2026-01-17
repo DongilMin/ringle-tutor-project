@@ -103,23 +103,22 @@ RSpec.describe 'Api::V1::Admin::Memberships', type: :request do
   describe 'DELETE /api/v1/admin/memberships/:id' do
     let!(:membership) { create(:membership, user: user, status: 'active') }
 
-    it 'soft deletes the membership by changing status to cancelled' do
+    it 'deletes the membership from database' do
       delete "/api/v1/admin/memberships/#{membership.id}"
 
       expect(response).to have_http_status(:ok)
 
       json = JSON.parse(response.body)
       expect(json['success']).to be true
-      expect(json['message']).to eq('Membership cancelled successfully')
+      expect(json['message']).to eq('Membership deleted successfully')
 
-      membership.reload
-      expect(membership.status).to eq('cancelled')
+      expect(Membership.find_by(id: membership.id)).to be_nil
     end
 
-    it 'does not actually delete the record' do
+    it 'decreases membership count' do
       expect {
         delete "/api/v1/admin/memberships/#{membership.id}"
-      }.not_to change(Membership, :count)
+      }.to change(Membership, :count).by(-1)
     end
 
     context 'when membership does not exist' do

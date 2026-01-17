@@ -45,14 +45,14 @@ module Api
         def destroy
           membership = Membership.find(params[:id])
 
-          # Soft delete: status를 cancelled로 변경
-          if membership.update(status: "cancelled")
-            render_success(message: "Membership cancelled successfully")
+          # Hard delete: 실제로 레코드 삭제
+          if membership.destroy
+            render_success(message: "Membership deleted successfully")
           else
             render_error(
-              message: "Failed to cancel membership",
+              message: "Failed to delete membership",
               status: :unprocessable_entity,
-              code: "CANCELLATION_FAILED"
+              code: "DELETION_FAILED"
             )
           end
         end
