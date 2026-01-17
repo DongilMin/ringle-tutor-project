@@ -120,7 +120,7 @@ RSpec.describe PaymentService do
         # 멤버십 생성 실패 시뮬레이션
         memberships_double = double('memberships')
         allow(memberships_double).to receive(:currently_valid).and_return(memberships_double)
-        allow(memberships_double).to receive(:update_all)
+        allow(memberships_double).to receive(:destroy_all)
         allow(memberships_double).to receive(:create!).and_raise(ActiveRecord::RecordInvalid)
         allow_any_instance_of(User).to receive(:memberships).and_return(memberships_double)
       end

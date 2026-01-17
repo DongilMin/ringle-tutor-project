@@ -136,8 +136,11 @@ export default function Conversation() {
   useEffect(() => {
     const init = async () => {
       try {
-        // Create new conversation
-        const newConv = await createConversation('New Session ' + new Date().toLocaleTimeString());
+        // Create new conversation with user_id
+        const newConv = await createConversation(
+          'New Session ' + new Date().toLocaleTimeString(),
+          currentUser?.id
+        );
         setSessionId(newConv.id);
 
         // Update remaining conversations if returned from API
@@ -277,7 +280,9 @@ export default function Conversation() {
     setPreviewBlob(null);
 
     const doSendAudio = async () => {
-      const response = await withRetry(() => sendAudioMessage(sessionId, blobToSend));
+      const response = await withRetry(() =>
+        sendAudioMessage(sessionId, blobToSend, currentUser?.id)
+      );
       const { user_message, assistant_message, audio } = response as AudioSendResponse;
 
       // Include user's audio URL for playback
@@ -408,37 +413,44 @@ export default function Conversation() {
       // Use streaming API
       setStreamingText('');
 
-      abortStreamRef.current = sendTextMessageStream(sessionId, userText, {
-        onChunk: (chunk) => {
-          setStreamingText((prev) => prev + chunk);
-        },
-        onComplete: (data) => {
-          setStreamingText('');
-          const audioUrl = data.audio?.data
-            ? `data:${data.audio.content_type};base64,${data.audio.data}`
-            : undefined;
-          addMessage({ content: data.assistant_message.content, sender: 'ai', audioUrl });
+      abortStreamRef.current = sendTextMessageStream(
+        sessionId,
+        userText,
+        {
+          onChunk: (chunk) => {
+            setStreamingText((prev) => prev + chunk);
+          },
+          onComplete: (data) => {
+            setStreamingText('');
+            const audioUrl = data.audio?.data
+              ? `data:${data.audio.content_type};base64,${data.audio.data}`
+              : undefined;
+            addMessage({ content: data.assistant_message.content, sender: 'ai', audioUrl });
 
-          if (audioUrl) {
-            playResponseAudio(audioUrl);
-          } else {
+            if (audioUrl) {
+              playResponseAudio(audioUrl);
+            } else {
+              setConversationState('idle');
+            }
+            setIsProcessing(false);
+            abortStreamRef.current = null;
+          },
+          onError: (error) => {
+            setStreamingText('');
+            setToastError(`스트리밍 오류: ${error}`);
             setConversationState('idle');
-          }
-          setIsProcessing(false);
-          abortStreamRef.current = null;
+            setIsProcessing(false);
+            abortStreamRef.current = null;
+          },
         },
-        onError: (error) => {
-          setStreamingText('');
-          setToastError(`스트리밍 오류: ${error}`);
-          setConversationState('idle');
-          setIsProcessing(false);
-          abortStreamRef.current = null;
-        },
-      });
+        currentUser?.id
+      );
     } else {
       // Use non-streaming API
       const doSendText = async () => {
-        const response = await withRetry(() => sendTextMessage(sessionId, userText));
+        const response = await withRetry(() =>
+          sendTextMessage(sessionId, userText, currentUser?.id)
+        );
         const { assistant_message, audio } = response as AudioSendResponse;
 
         const audioUrl = audio?.data

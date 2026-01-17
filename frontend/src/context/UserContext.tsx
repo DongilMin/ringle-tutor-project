@@ -9,7 +9,7 @@ export interface User {
 
 export interface Membership {
   id: number;
-  membership_type: 'basic' | 'premium';
+  membership_type: 'basic' | 'premium' | 'enterprise';
   status: 'active' | 'expired' | 'cancelled';
   start_date: string;
   end_date: string;

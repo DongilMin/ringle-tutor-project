@@ -19,8 +19,8 @@ module Api
         def create
           user = User.find(params[:user_id] || params.dig(:membership, :user_id))
 
-          # Cancel existing active memberships before creating new one
-          user.memberships.currently_valid.update_all(status: "cancelled")
+          # Delete existing active memberships before creating new one
+          user.memberships.currently_valid.destroy_all
 
           membership = user.memberships.build(membership_params.except(:user_id))
 

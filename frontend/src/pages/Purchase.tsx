@@ -105,10 +105,8 @@ export default function Purchase() {
     const fetchPlans = async () => {
       try {
         const planData = await getPlans();
-        // Filter out enterprise for regular users, only show basic and premium
-        const displayPlans = planData
-          .filter((p) => p.type !== 'enterprise')
-          .map(convertToDisplayPlan);
+        // Show all plans including enterprise
+        const displayPlans = planData.map(convertToDisplayPlan);
         setPlans(displayPlans);
         setStep('select');
       } catch (error) {
@@ -297,7 +295,7 @@ export default function Purchase() {
             <h1 className="mb-2 text-center text-3xl font-bold text-gray-900">멤버십 선택</h1>
             <p className="mb-8 text-center text-gray-600">나에게 맞는 플랜을 선택하세요</p>
 
-            <div className="grid gap-6 md:grid-cols-2">
+            <div className="grid gap-6 md:grid-cols-3">
               {plans.map((plan) => (
                 <div
                   key={plan.type}

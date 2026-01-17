@@ -121,26 +121,27 @@ describe('Purchase Page', () => {
     });
   });
 
-  it('does not show enterprise plan (filtered out for regular users)', async () => {
+  it('shows enterprise plan details from API', async () => {
     renderWithProviders(<Purchase />);
 
     await waitFor(() => {
       expect(screen.getByText('멤버십 선택')).toBeInTheDocument();
     });
 
-    // Enterprise should not be visible
-    expect(screen.queryByText(/엔터프라이즈/)).not.toBeInTheDocument();
-    expect(screen.queryByText('₩49,900')).not.toBeInTheDocument();
+    // Enterprise should be visible
+    expect(screen.getByText(/엔터프라이즈/)).toBeInTheDocument();
+    expect(screen.getByText('₩49,900')).toBeInTheDocument();
+    expect(screen.getByText('/90일')).toBeInTheDocument();
   });
 
   it('renders feature list', async () => {
     renderWithProviders(<Purchase />);
 
     await waitFor(() => {
-      // Both plans have learning feature, so it appears twice
-      expect(screen.getAllByText('학습 기능')).toHaveLength(2);
-      expect(screen.getAllByText('AI 대화')).toHaveLength(2);
-      expect(screen.getAllByText('레벨 분석')).toHaveLength(2);
+      // All 3 plans have learning feature, so it appears 3 times
+      expect(screen.getAllByText('학습 기능')).toHaveLength(3);
+      expect(screen.getAllByText('AI 대화')).toHaveLength(3);
+      expect(screen.getAllByText('레벨 분석')).toHaveLength(3);
     });
   });
 

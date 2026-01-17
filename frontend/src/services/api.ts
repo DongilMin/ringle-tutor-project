@@ -197,8 +197,8 @@ export const purchaseMembership = async (
   return response.data;
 };
 
-export const createConversation = async (title: string) => {
-  const response = await api.post('/conversations', { title });
+export const createConversation = async (title: string, userId?: number) => {
+  const response = await api.post('/conversations', { title, user_id: userId });
   // Backend returns {success: true, data: {...}}, extract the data
   return response.data.data || response.data;
 };
@@ -213,9 +213,14 @@ export const getMessages = async (id: string | number) => {
   return response.data;
 };
 
-export const sendTextMessage = async (conversationId: string | number, content: string) => {
+export const sendTextMessage = async (
+  conversationId: string | number,
+  content: string,
+  userId?: number
+) => {
   const response = await api.post(`/conversations/${conversationId}/messages`, {
     message: { content },
+    user_id: userId,
   });
   // Backend returns {success: true, data: {...}}, extract the data
   return response.data.data || response.data;
@@ -235,7 +240,8 @@ export interface StreamCallbacks {
 export const sendTextMessageStream = (
   conversationId: string | number,
   content: string,
-  callbacks: StreamCallbacks
+  callbacks: StreamCallbacks,
+  userId?: number
 ): (() => void) => {
   const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
   const url = `${baseUrl}/conversations/${conversationId}/stream`;
@@ -248,7 +254,7 @@ export const sendTextMessageStream = (
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ message: { content } }),
+    body: JSON.stringify({ message: { content }, user_id: userId }),
     signal: controller.signal,
   })
     .then(async (response) => {
@@ -317,7 +323,11 @@ export const sendTextMessageStream = (
   return () => controller.abort();
 };
 
-export const sendAudioMessage = async (conversationId: string | number, audioBlob: Blob) => {
+export const sendAudioMessage = async (
+  conversationId: string | number,
+  audioBlob: Blob,
+  userId?: number
+) => {
   const reader = new FileReader();
   return new Promise((resolve, reject) => {
     reader.onloadend = async () => {
@@ -328,6 +338,7 @@ export const sendAudioMessage = async (conversationId: string | number, audioBlo
             data: base64Audio,
             content_type: audioBlob.type || 'audio/webm',
           },
+          user_id: userId,
         });
         // Backend returns { success: true, data: {...} }, extract the data
         resolve(response.data.data || response.data);
