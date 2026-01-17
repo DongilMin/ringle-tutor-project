@@ -25,7 +25,7 @@ class Membership < ApplicationRecord
   }.freeze
 
   belongs_to :user
-  has_one :payment
+  has_one :payment, dependent: :nullify
 
   validates :membership_type, presence: true, inclusion: { in: TYPES }
   validates :start_date, presence: true
